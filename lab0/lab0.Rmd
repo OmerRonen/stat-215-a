@@ -20,19 +20,19 @@ data("USArrests")
 fileName <- 'data/stateCoord.txt'
 coords_txt <- readChar(fileName, file.info(fileName)$size)
 
-extract_city <- function(s){
+.extract_city <- function(s){
   city <- strsplit(s, ' ')[[1]][1]
   city <- gsub('-', ' ', city)
   return(city)
 }
 
-extract_long <- function(s){
+.extract_long <- function(s){
   str_split <- strsplit(s, ' ')[[1]]
   
   return(as.numeric(str_split[length(str_split)-1]))
 }
 
-extract_lan <- function(s){
+.extract_lan <- function(s){
   str_split <- strsplit(s, ' ')[[1]]
   
   return(as.numeric(str_split[length(str_split)]))
@@ -42,9 +42,9 @@ extract_lan <- function(s){
 lines <- strsplit(coords_txt, '\n')[[1]]
 
 
-cities <- unlist(lapply(lines[2:length(lines)], FUN = extract_city))
-long <- unlist(lapply(lines[2:length(lines)], FUN = extract_long))
-lan <- unlist(lapply(lines[2:length(lines)], FUN = extract_lan))
+cities <- unlist(lapply(lines[2:length(lines)], FUN = .extract_city))
+long <- unlist(lapply(lines[2:length(lines)], FUN = .extract_long))
+lan <- unlist(lapply(lines[2:length(lines)], FUN = .extract_lan))
 
 coords = data.frame(long=long, lan=lan)
 rownames(coords) = cities
@@ -67,34 +67,37 @@ arrests = dplyr::full_join(arr, coo,by="region")
 
 ## Visualizing the data
 
-* Murder vs Assault
+* Murder vs Assault  
 
 ```{r echo=FALSE}
 arrests %>% ggplot(aes(Murder, Assault, label=region)) + geom_point()
 
 ```
 
-It seems like there is a linear connection between murder and assault
+It seems like there is a linear connection between murder and assault, across states.  
 
-* Rape vs  urban population
+* Rape vs  urban population  
+
 ```{r echo=FALSE}
-arrests %>% ggplot(aes(Rape, UrbanPop, label=region)) +geom_point(color = case_when(arrests$Rape>40 & arrests$UrbanPop < 50~ "#1b9e77", TRUE ~ "#7570b3")) 
+arrests %>% ggplot(aes(Rape, UrbanPop, label=region)) +geom_point(color = case_when(arrests$Rape>40 & arrests$UrbanPop < 50~ "red", TRUE ~ "black")) 
 ```
 
 
 * Now with names
 
 ```{r echo=FALSE}
-arrests %>% ggplot(aes(Murder, Assault, label=region)) + geom_point() + geom_text()
+arrests %>% ggplot(aes(Murder, Assault, label=region)) + geom_point() + geom_text(vjust=1.5)
 
 ```
 
 
 ```{r echo=FALSE}
-arrests %>% ggplot(aes(Rape, UrbanPop, label=region)) + geom_point(color = case_when(arrests$Rape>40 & arrests$UrbanPop < 50~ "#1b9e77", TRUE ~ "#7570b3")) + geom_text(vjust=1.5, color = case_when(arrests$Rape>40 & arrests$UrbanPop < 50~ "#1b9e77", TRUE ~ "#7570b3"))
+arrests %>% ggplot(aes(Rape, UrbanPop, label=region)) + geom_point(color = case_when(arrests$Rape>40 & arrests$UrbanPop < 50~ "red", TRUE ~ "black")) + geom_text(vjust=1.5, color = case_when(arrests$Rape>40 & arrests$UrbanPop < 50~ "red", TRUE ~ "black"))
 
 ```
+Alaska is the outlier, the rape rate in alaska in extremly high, at first I thought this was a mistake in the data but looking online (https://edition.cnn.com/interactive/2014/02/opinion/sutter-change-alaska-rape/) it seems like a real problem.  
 
+* Challenge  
 
 ```{r, echo=TRUE}
 library(maps)
@@ -115,17 +118,54 @@ ggplot(map.df, aes(x=long,y=lat,group=group))+
 
 ## Regression
 
+1-3.  
+
 ```{r, echo=TRUE}
 arrests_f <- arrests %>% dplyr::select(-Murder, -Assault)
 linear_fit <-lm(Rape~UrbanPop, data = arrests_f)
-plot(linear_fit, 1)
+plot(linear_fit,1)
 ```
 
 
+
+Looking at the residuals helps us to get a sense of how our model assumptions do in reality, the first assumption is that the expected value of the residuals is 0, looking at this plot there's no clear evidence to say that this assumption is violated. Another thing to look at is homoscedasticity of the residuals, which means that the variance is the same across all population sizes. From the plot I can say that the variance of the residuals increases with the populations size (the coefficient is positive, hence we can conclude that an increase in fitted values comes from an increase population).  
+
+4. 
+
 ```{r echo=TRUE, message=FALSE, warning=FALSE}
-arrests %>% ggplot(aes(Rape, UrbanPop, label=region)) +geom_point(color = case_when(arrests$Rape>40 & arrests$UrbanPop < 50~ "#1b9e77", TRUE ~ "#7570b3")) +
+arrests %>% ggplot(aes(Rape, UrbanPop, label=region)) +
+  geom_point(color = case_when(arrests$Rape>40 & 
+                                 arrests$UrbanPop < 50~ "red"
+                               , TRUE ~ "black")) +
+ geom_smooth(method='lm', se = FALSE, colour='blue') 
+```
+
+5.  
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+arrests %>% ggplot(aes(Rape, UrbanPop, label=region)) +
+  geom_point(color = case_when(arrests$Rape>40 & 
+                                 arrests$UrbanPop < 50~ "red", TRUE ~ "black")) +
+ geom_smooth(method='lm', se = FALSE, colour='blue') +
+ geom_smooth(data=arrests[arrests$region!='Alaska',],method='lm',
+             se = FALSE, colour='red') 
+```
+
+- I think that most of the variation in the data isn't explained by any of the linear models. What I get looking at the two models is that both are saying that there is a positive correlation between population size and rape.
+- With regard to Alaska (data point 2) we can observe the effect of observation with high cook's distance have on our regression line, shifting it significantly down.  
+```{r, echo=FALSE}
+plot(linear_fit,4)
+```
+
+7.  
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+arrests %>% ggplot(aes(Rape, UrbanPop, label=region)) +
+  geom_point(color = case_when(arrests$Rape>40 & 
+                                 arrests$UrbanPop < 50~ "#1b9e77", TRUE ~ "#7570b3")) +
  geom_smooth(method='lm', se = FALSE, aes(color = "Full data")) +
- geom_smooth(data=arrests[arrests$region!='Alaska',],method='lm', se = FALSE, aes(color = "Alaska excluded")) +
+ geom_smooth(data=arrests[arrests$region!='Alaska',],method='lm',
+             se = FALSE, aes(color = "Alaska excluded")) +
   ggtitle('Rape vs Urban Population regression plot')+ 
   xlab('Rape')+
   ylab('Urban Population')+
@@ -133,4 +173,21 @@ arrests %>% ggplot(aes(Rape, UrbanPop, label=region)) +geom_point(color = case_w
                         breaks = c("Full data", "Alaska excluded"),
                         values = c("Full data" = "blue", "Alaska excluded" = "red") )
 ```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
