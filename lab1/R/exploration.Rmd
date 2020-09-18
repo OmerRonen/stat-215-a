@@ -1,0 +1,224 @@
+---
+title: "exploration"
+author: "Omer Ronen"
+date: "9/13/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, echo = FALSE, message=FALSE, warning=FALSE}
+# load in useful packages
+library(tidyverse)
+library(forcats)
+library(lubridate)
+library(stringr)
+library(knitr)
+library(kableExtra)
+library(GGally)
+library(zoo)
+library(gridExtra)
+library(ggpubr)
+
+
+
+rm(list=ls()) 
+setwd('~/Documents/Phd/215A/stat-215-a/lab1')
+# set default knitr chunks
+knitr::opts_chunk$set(
+  echo = FALSE,  # don't print the code chunk
+  warning = FALSE,  # don't print warnings
+  message = FALSE,  # don't print messages
+  fig.width = 6,  # set default width of figures
+  fig.height = 4,  # set default height of figures
+  fig.align = "center",  # always align figure in center
+  fig.pos = "H",  # always plot figure at the exact location of the code chunk
+  cache = FALSE)  # don't cache results
+
+# load in the loadData() functions
+source("R/load.R")
+# load in the cleanData() functions
+source("R/clean.R")
+
+# generic function to save figures with ggplot
+save_fig <- function(fig_name){
+  ggsave(fig_name, width = 5, height = 5)
+
+}
+```
+
+
+```{r load and initial cleaning, echo=FALSE, message=FALSE, warning=FALSE, cache=FALSE}
+# note that the cache = TRUE chunk argument means that the results of this 
+# chunk are saved so it doesn't need to be re-run every time you compile the pdf
+
+# load the dates data
+
+data_path = "~/Documents/Phd/215A/stat-215-a/lab1/data/"
+redwood_all_orig <- loadRedwoodData(path = data_path, source = "all")
+redwood_net_orig <- loadRedwoodData(path = data_path, source = "net")
+redwood_log_orig <- loadRedwoodData(path = data_path, source = "log")
+coords <- loadMoteLocationData(path=data_path)
+
+redwood_rich = addSensorsInfo(redwood_all_orig, coords)
+# add some columns
+redwood_rich_clean <- cleanRedwoodData(redwood_rich)
+# dividing by 54
+redwood_rich_clean <- normPAR(redwood_rich_clean)
+
+```
+
+
+```{r }
+# create plot to see radiation across time of day sanity check for sunset and sunrise timee
+
+dates_orig <- loadDatesData(path =data_path)
+#clean the dates data
+dates <- cleanDatesData(dates_orig)
+redwood_dates = mergeDates(redwood_rich_clean, dates)
+
+
+may_the_force = day(redwood_dates$result_time)==4 & month(redwood_dates$result_time)==5
+
+redwood_dates[redwood_dates$Incident_PAR < 100000 & may_the_force, ] %>% ggplot(aes(x=result_time, y=Incident_PAR)) + geom_point(aes(color=Height))+scale_colour_gradient(low = "brown", high = "green") + theme_minimal() + xlab("") + ylab('Incident PAR')
+
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# descriptive statistics
+
+summary_data = redwood_dates %>% select(-c('result_time', 'humid_adj', 'parent', 'node_id', 'epoch', 'depth', 'Tree')) 
+kable(summary(summary_data)) %>%
+  kable_material_dark()
+```
+
+
+
+```{r }
+# temp and humidity time series per height
+
+redwood_dates %>% ggplot(aes(x=result_time, y=Temperature)) + geom_point(aes(colour =Height)) +
+  scale_colour_gradient(low = "brown", high = "green") + theme_minimal() + xlab('')
+
+redwood_dates %>% ggplot(aes(x=Humidity, y=Temperature)) + geom_point(aes(colour =Height)) +
+  scale_colour_gradient(low = "brown", high = "green") + theme_minimal()
+
+
+```
+
+```{r dew point}
+redwood_0 = redwood_dates
+dew_point <- function(rh, t){
+  # formula taken form https://en.wikipedia.org/wiki/Dew_point
+  b = 18.678
+  c = 257.14
+  
+  g = log(rh/100) + (b*t)/(c+t)
+  d = (c*g)/(b-g)
+  return(d)
+}
+redwood_0$dew_point = dew_point(redwood_0$Humidity, redwood_0$Temperature)
+redwood_1 <- removeOutliers1(redwood_0)
+
+plot_dew <- function(redwood_df){
+  
+  redwood_df %>% ggplot(aes(x=Temperature, y=dew_point))  + geom_point(aes(colour =Humidity)) +
+    scale_colour_gradient(low = "brown", high = "blue") + theme_minimal() + ylab('Dew point')
+}
+  
+plot_dew(redwood_0)
+plot_dew(redwood_1)
+
+```
+
+
+```{r echo=FALSE, message=FALSE}
+redwood_1 %>%
+  select(c('Reflected_PAR', Humidity, Temperature,'Incident_PAR') ) %>%
+  gather(cols, value) %>%
+  ggplot(aes(x = value)) + geom_histogram(fill=I("blue"),alpha=I(.6), bins = 20) + facet_wrap(.~cols, scales="free") + theme_minimal()
+
+```
+
+
+
+```{r echo=FALSE, fig.height=10, fig.width=10}
+# ggpairs plot on subsampled data
+
+n=3000
+redwood_s = redwood_1[sample(nrow(redwood_1), n), ]
+measurments <- redwood_s[, c( "Humidity", "Temperature",'Incident_PAR', 'Reflected_PAR')]
+h = hour(redwood_s$result_time)
+day_time = h > 6 & h < 18
+ggplot2::theme_set(ggplot2::theme_minimal())
+measurments$hour = as.factor(ifelse(day_time, 'day time', 'night time'))
+colnames(measurments) = c( "Humidity", "Temperature",'Incident PAR', 'Reflected PAR', 'Hour')
+ggpairs(measurments,aes(color=Hour, alpha=Hour), upper = list(continuous = wrap("cor", size=5)))  + scale_color_manual(values =c('red', 'blue'))  + scale_fill_manual(values =c('red', 'blue')) + scale_alpha_manual(values = c(0.3, 0.3)) +theme(text = element_text(size=20))
+
+```
+
+
+
+
+```{r echo=FALSE, message=FALSE,height=15, fig.width=17}
+# plotting first finding
+
+save_node_analysis <- function(id ,redwood_1){
+date_broke = max(redwood_1$`result_time`[redwood_1$node_id == id])
+c1 = paste("Others after ",date(date_broke))
+c2 = paste("Others before ",date(date_broke))
+redwood_1$Sensors =ifelse(redwood_1$node_id == id,paste('Node ', id, "(broke on ", date(date_broke), ")"),c1)
+season_64 = redwood_1$`result_time` < date_broke
+redwood_1$Sensors[season_64 &redwood_1$Sensors==c1] =c2
+data <- redwood_1 %>%
+  select(Height, Humidity, Sensors, Temperature)
+
+p1 <- ggplot() +geom_point(data=data, aes(x=Height, y=Humidity, colour =Sensors, alpha=Sensors)) + theme_minimal() + scale_color_manual(values=c('red','yellow', 'blue')) + scale_alpha_manual(values=c(0.7,0.01,1))  
+p2 <- ggplot() +geom_point(data=data, aes(x=Height, y=Temperature, colour =Sensors, alpha=Sensors)) + theme_minimal() + scale_color_manual(values=c('red','yellow', 'blue')) + scale_alpha_manual(values=c(0.7,0.01,1))
+
+
+ggarrange(p1, p2, col=1, nrow=1, common.legend = TRUE)
+
+
+}
+
+save_node_analysis(109, redwood_1)
+
+```
+
+
+```{r}
+# plotting third finding
+
+redwood_1$week = as.factor(week(redwood_1$result_time) - min(week(redwood_1$result_time)) +1)
+
+p1= ggplot(data = redwood_1, aes(x=week, y=dew_point,fill=week)) + geom_boxplot(show.legend = FALSE) + theme_minimal()+ scale_fill_brewer(palette="RdBu") + xlab("") +ylab('Dew point')
+p2= ggplot(data = redwood_1, aes(x=week, y=Humidity,fill=week)) + geom_boxplot(show.legend = FALSE) + theme_minimal()+ scale_fill_brewer(palette="RdBu")
+ggarrange(p1, p2, col=2, nrow=2)
+
+```
+
+
+```{r}
+# plotting second finding
+
+agg_df =aggregate(result_time ~ Height, data = redwood_1, max)
+agg_df = merge(agg_df, redwood_1[, c('Height', 'node_id')], by='Height')
+agg_df = agg_df[!duplicated(agg_df),]
+agg_df %>% ggplot(aes(x=result_time, y=Height)) + geom_point(aes(colour =Height)) +
+    scale_colour_gradient(low = "brown", high = "green") + xlab('') + theme_minimal() +geom_text(aes(label=node_id),hjust=0, vjust=0)
+save_fig('voltage.png')
+
+
+```
+
+
+
+```{r echo=FALSE, message=FALSE,height=15, fig.width=17}
+
+# pertubating
+save_node_analysis(122, redwood_1)
+save_node_analysis(78, redwood_1)
+
+```
