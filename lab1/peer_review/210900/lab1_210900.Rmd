@@ -1,0 +1,376 @@
+---
+title: "Lab 1 - Redwood Data, Stat 215A, Fall 2020"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  pdf_document:
+    number_sections: yes
+  html_document:
+    df_print: paged
+header-includes: \usepackage{float}
+---
+
+
+```{r setup, echo = FALSE, message=FALSE, warning=FALSE}
+# load in useful packages
+library(tidyverse)
+library(forcats)
+library(lubridate)
+library(stringr)
+library(here)
+library(knitr)
+library(ggExtra)
+library(RColorBrewer)
+library(directlabels)
+
+
+# set default knitr chunks
+knitr::opts_chunk$set(
+  echo = FALSE,  # don't print the code chunk
+  warning = FALSE,  # don't print warnings
+  message = FALSE,  # don't print messages
+  fig.width = 6,  # set default width of figures
+  fig.height = 4,  # set default height of figures
+  fig.align = "center",  # always align figure in center
+  fig.pos = "H",  # always plot figure at the exact location of the code chunk
+  cache = FALSE)  # don't cache results
+
+# load in the loadData() functions
+source(here("R/load.R"))
+# load in the cleanData() functions
+source(here("R/clean.R"))
+source(here("R/judgment_call.R"))
+source(here("R/explore.R"))
+```
+
+```{r load-data, echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE}
+# note that the cache = TRUE chunk argument means that the results of this 
+# chunk are saved so it doesn't need to be re-run every time you compile the pdf
+
+######### (this code is slow)
+# load the dates data
+# dates_orig <- loadDatesData(path = here("data/"))
+# clean the dates data
+# dates <- cleanDatesData(dates_orig)
+#############
+
+# instead of the above, generate dates (much faster)
+# just convert epoch to times by going every 5 minutes
+# starting from 2004-04-27 17:10:00
+epoch = 1:13000
+epoch_diffs = 60*5*(epoch - 1)
+epoch_times = ymd_hms('2004-04-27 17:10:00') + epoch_diffs
+epoch_df = data.frame(epoch = epoch, epoch_times = epoch_times)
+
+# which(epoch_times != dates$datetime) is empty, so no difference
+
+# load the mote location data
+motes_df_orig <- loadMoteLocationData(path = here("data/"))
+# clean the mote location data
+motes_df <- cleanMoteLocationData(motes_df_orig)
+
+
+
+# load the redwood sensor data
+redwood_net_orig <- loadRedwoodData(path = here("data/"), source = "net")
+redwood_log_orig <- loadRedwoodData(path = here("data/"), source = "log")
+
+# mark data sources
+redwood_net_orig$data_source = "network"
+redwood_log_orig$data_source = "logs"
+# rbinding the same result as just loading the full data directly
+redwood_orig = rbind(redwood_net_orig, redwood_log_orig) 
+
+# tidy the redwood sensor data
+# not quite cleaning---no judgment calls have been made yet,
+# no data has been thrown out. 
+# just putting it in a tidy format!
+redwood_tidy <- tidyRedwoodData(redwood_orig, epoch_df, motes_df)
+
+```
+
+# Introduction
+
+As a native to Northern California, my childhood was occasionally punctuated by trips where I accompanied other children to be guided through the beautiful redwoods. The tallest and oldest trees of the world, they are home to their own individual ecosystems and microclimates that vary richly up and down the tree. And yet, between logging of the valuable wood, as well as California wildfires powered by climate change, the details are rubbed away. 
+
+My belief is that if we are going to allow something to decay or fade, we must do it consciously; that is, knowingly of what we are giving up. Hence the purpose of this report is to explore the climatic data of a redwood tree from a visual, easily-digested perspective, and to see pictures of a redwood tree's microclimate that will not be too quickly unseen. It is too sad to have things vanish, with us not even knowing what we have left behind as we roll and crash our way through history. As part of this, it is also important to understand the specific challenges of the data collection and retrieval that produces these pictures in the first place.  
+
+Hence in this report I will analyse the dataset referenced in Tolle et. al [1] of climatic data gathered from redwood trees in Sonoma, CA. I will describe the data, and issues in its preparation and organization; then, having fixed the issues, I will explore it from a birds-eye view, and verify its consistency. Then I will critique the plots of [1], that answers questions on the topic of this report; finally I will analyse the data in a new way and provide understanding of the redwood tree's microclimate. 
+
+# Data
+
+## Data Collection
+
+(I planned to discuss the data collection process from Tolle et al for PAR incident, but did not have time.)
+
+## Data Cleaning
+
+The data as given had numerous issues. Here are some of the inconsistences uncovered in this analysis:
+
+1. Two obvious outliers with extreme readings for most of the climatic sensors, namely the ones with humidity readings in the negative thousands. 
+2. Unreliable voltage readings, in the two hundreds of volts.
+3. The PAR sensors were in unknown units. 
+4. There were many more nodes in the dataset than mentioned in [1]. 
+5. Unreliable result_time column---some had values in november. 
+6. Many duplicates of epoch/node_id pairs, which had identical climatic measurements but different voltage and result_times. 
+7. Some duplicates of epoch/node_id pairs existed, but which had DIFFERENT climatic measurements. 
+8. Unreliable sensors that no longer measured correctly, and identifying them. 
+9. No documentation on what the columns parent and depth are, and some strange nodes that don't appear in the mote-location-data.txt.
+
+
+Here is how they were resolved: 
+
+1. These were simply removed. 
+2. All of these voltage readings were from the data sent through the network, and it turns out that many (but not all) of them had duplicates in the logs (matching by node_id/epoch). It was also discovered that the strange voltage readings had a linear relationship with the voltage of their duplicates in the logs. A linear regression was run and the correct voltage was inferred and imputed by the linear relationship. 
+3. It was inferred that they were in lux, as are most photodiodes, and then to convert from lux to einstein units 
+4. There were actually TWO trees in the dataset, only one of which was analyzed in [1]. This was determined by comparing the heights of nodes to the ones used in the paper and closely reading mote-location-data.txt. Throughout the analysis I restrict myself to the one tree used in [1]. 
+8. Even though [1] removed these by a voltage condition, I found this to be insufficient, because many low voltages were valid data points (as can be shown through tables) and many high voltages were actually good datapoints. The errant nodes were actually removed by making line plots and observing by hand when the nodes appeared to become erratic, and removing those data beyond when they appeared to stop tracking the other values. (See the below figure of line plots.)
+
+(I did not have time to complete this section.)
+
+
+```{r voltage, echo = FALSE, fig.cap="The linear relationship between the high voltages and the normal voltages."}
+
+low_v = remove_true_dups(filter(redwood_tidy, voltage < 100)) %>% filter(node_id != 29, rel_humidity > - 1000)
+high_v = remove_true_dups(filter(redwood_tidy, voltage >= 100)) %>% filter(node_id != 29, rel_humidity > - 1000) %>% rename(high_volt = voltage)
+
+together_v = inner_join(low_v, high_v, by = c('epoch','node_id')) %>% select(epoch, node_id, voltage, high_volt) %>% filter(high_volt < 1020)
+
+plt = ggplot(together_v, aes(x = voltage, y = high_volt)) + geom_point()
+print(plt)
+
+
+```
+  
+  
+```{r humid-temp-plots, echo = FALSE, fig.cap = "Plots of the nodes that went haywire, and the timepoints after which I scrubbed their data."}
+
+bad_data = filter(redwood_tidy, {
+  node_id == 78 | 
+  node_id == 145 | 
+  node_id == 123 | 
+  node_id == 141 | 
+  node_id == 3 | 
+  node_id == 59 | 
+  node_id == 29 | 
+  node_id == 107 | 
+  node_id == 64 | 
+  node_id == 40  
+})
+
+
+humid_bad = bad_data %>%
+  ggplot(aes(x = epoch_times, y = rel_humidity, color = node_id)) + 
+  geom_line(alpha = 0.3) + 
+  geom_dl(aes(label = node_id), method = "last.points", cex = 0.8, alpha = 0.8) + 
+  theme(axis.text=element_text(size=5)) + 
+  geom_vline(xintercept = ymd_h(
+   "2004-5-08 12",
+   "2004-5-09 11",
+   "2004-5-14 18",
+   "2004-5-28 19",
+   "2004-5-10 00"
+  ))
+
+temp_bad = bad_data %>%
+  ggplot(aes(x = epoch_times, y = temp_celcius, color = node_id)) + 
+  geom_line(alpha = 0.3) + 
+  geom_dl(aes(label = node_id), method = "last.points", cex = 0.8, alpha = 0.8) + 
+  theme(axis.text=element_text(size=5)) + 
+  geom_vline(xintercept = ymd_h(
+   "2004-5-07 23",
+   "2004-5-08 17",
+   "2004-5-14 18",
+   "2004-5-28 22",
+   "2004-5-09 21",
+   "2004-5-05 18",
+   "2004-5-06 7"
+  ))
+
+print(humid_bad)
+print(temp_bad)
+
+```
+
+
+
+```{r clean-data, echo = FALSE, cache = TRUE, results='hide', message = FALSE}
+redwood_clean = make_judgment_calls(redwood_tidy)
+redwood_tolle = redwood_clean %>% filter(tree_id == "TreeTolle05")
+
+```
+## Data Exploration
+
+Per the previous discussion, the data was cleaned and all referenced issues were fixed. 
+
+Visual summaries of the data will now be presented. As previously noted, the data was collected over 44 days from sensors attached to 33 nodes up and down the height of the 65m redwood tree, but only one node collected all 44 days of data; the others all gave out at earlier times. 
+
+Notwithstanding, we provide visual summaries of the six-and-a-half weeks of data collection. First we present plots of temperature and humidity, which are highly correlated environmental variables. One notes the large-scale changing weather patterns observed around the tree. 
+
+
+```{r fig.cap = "Temperature over the data collection period. Each box represents about six days.", echo = FALSE}
+
+pastel = brewer.pal(n = 9, name = "Pastel1")  # 
+
+start = min(redwood_tolle$epoch_time, na.rm = TRUE)
+diff = (max(redwood_tolle$epoch_time, na.rm = TRUE) - min(redwood_tolle$epoch_time, na.rm = TRUE))
+
+plt = redwood_tolle %>% 
+  mutate(bin = case_when(
+    start + 0*diff/7 <= epoch_times & epoch_times < start + 1*diff/7 ~ "1",
+    start + 1*diff/7 <= epoch_times & epoch_times < start + 2*diff/7 ~ "2",
+    start + 2*diff/7 <= epoch_times & epoch_times < start + 3*diff/7 ~ "3",
+    start + 3*diff/7 <= epoch_times & epoch_times < start + 4*diff/7 ~ "4",
+    start + 4*diff/7 <= epoch_times & epoch_times < start + 5*diff/7 ~ "5",
+    start + 5*diff/7 <= epoch_times & epoch_times < start + 6*diff/7 ~ "6",
+    start + 6*diff/7 <= epoch_times & epoch_times < start + 7*diff/7 ~ "7"
+    # start + 7*diff/7 <= epoch_times & epoch_times < start + 8*diff/7 ~ "8",
+    # start + 8*diff/7 <= epoch_times & epoch_times < start + 9*diff/7 ~ "9"
+)) %>% 
+  ggplot(aes(x = epoch_times, y = temp_celcius, group = bin, fill = bin)) + 
+  geom_boxplot() + 
+  scale_x_datetime(date_breaks = "5 days", date_labels = "%b %d") + 
+  scale_fill_manual(values = pastel) + 
+  ylab("Temperature (C°)") + xlab("Date") + 
+  theme_minimal() + 
+  theme(legend.position = 'none')
+
+print(plt) 
+
+```
+
+
+```{r fig.cap = "Relative humidity as a percentage.", echo = FALSE}
+
+pastel = brewer.pal(n = 9, name = "Pastel1")  # 
+
+start = min(redwood_tolle$epoch_time, na.rm = TRUE)
+diff = (max(redwood_tolle$epoch_time, na.rm = TRUE) - min(redwood_tolle$epoch_time, na.rm = TRUE))
+
+plt = redwood_tolle %>% 
+  mutate(bin = case_when(
+    start + 0*diff/7 <= epoch_times & epoch_times < start + 1*diff/7 ~ "1",
+    start + 1*diff/7 <= epoch_times & epoch_times < start + 2*diff/7 ~ "2",
+    start + 2*diff/7 <= epoch_times & epoch_times < start + 3*diff/7 ~ "3",
+    start + 3*diff/7 <= epoch_times & epoch_times < start + 4*diff/7 ~ "4",
+    start + 4*diff/7 <= epoch_times & epoch_times < start + 5*diff/7 ~ "5",
+    start + 5*diff/7 <= epoch_times & epoch_times < start + 6*diff/7 ~ "6",
+    start + 6*diff/7 <= epoch_times & epoch_times < start + 7*diff/7 ~ "7"
+    # start + 7*diff/7 <= epoch_times & epoch_times < start + 8*diff/7 ~ "8",
+    # start + 8*diff/7 <= epoch_times & epoch_times < start + 9*diff/7 ~ "9"
+)) %>% 
+  ggplot(aes(x = epoch_times, y = rel_humidity, group = bin, fill = bin)) + 
+  geom_boxplot() + 
+  scale_x_datetime(date_breaks = "5 days", date_labels = "%b %d") + 
+  scale_fill_manual(values = pastel) + 
+  ylab("Rel. Humidity (%)") + xlab("Date") + 
+  theme_minimal() + 
+  theme(legend.position = 'none')
+
+print(plt) 
+
+```
+
+(I also planned to display ridgeplots of the incident PAR over two days, but did not have time.)
+
+```{r fig.cap = "PAR_incid over two days"}
+
+
+```
+
+
+```{r fig.cap = "PAR_incid over height of the tree (ridge plot)"}
+
+
+```
+
+
+## Reality Check
+
+The cleaned data seems reasonable---the humidity and temperature move in opposite directions over time, that is colder temperatures correspond to higher relative humidity. This makes sense, because for the same amount of water in the air, at colder temperatures the maximum water the air can hold is less, so that the relative humidity is higher. 
+
+# Graphical Critique
+
+
+
+# Findings
+
+
+## First finding: Light through leaves
+
+Here we display a heatmap representing the incident PAR in einstein units at every time point and tree height. Brighter colors represent more incident light and in fact ~2000 represents direct sunlight. 
+
+We see that the nodes must be positioned such that as the Sun takes similar paths across the sky each day, similar patterns of light emerge, for instance that only at sunset do the lower nodes get hit by the sun. 
+
+```{r, echo = FALSE, fig.cap = "At every time point, the interpolated PAR "}
+
+
+YOR = brewer.pal(n = 9, name = "YlOrRd")  # 
+start = min(redwood_tolle$epoch_time, na.rm = TRUE)
+redwood_short = filter(redwood_clean, start < epoch_times, epoch_times < start + 3*86400)
+
+all_times = unique(redwood_short$epoch_times)
+df_list = vector(mode = "list", length = length(all_times))
+df = redwood_short %>% filter(tree_id == "TreeTolle05") %>% 
+  select(height_meters, epoch_times, PAR_incid_e)
+
+for(i in 1:length(all_times)){
+  t = all_times[i]
+  df_t = df %>% filter(epoch_times == t)
+  if(nrow(df_t) <= 1){
+    df_list[length(df_list)] = NULL
+    next()
+  }
+  ap = data.frame(approx(df_t$height_meters, df_t$PAR_incid_e, n = 200))
+  ap = rename(ap, height_meters = x, PAR_incid_e = y)
+  ap$epoch_times = t
+  df_list[[i]] = ap
+}
+
+out = bind_rows(df_list)
+
+plt = out %>% 
+  ggplot(aes(x = epoch_times, y = height_meters, fill = PAR_incid_e)) + geom_tile() + theme_classic() + 
+  scale_y_continuous(expand = c(0,0)) + scale_x_datetime(expand = c(0,0)) + scale_fill_gradientn(colours = rev(YOR), name = "Incident PAR") + xlab("Date") + ylab("Tree Height (meters)")
+
+
+print(plt)
+```
+
+
+
+## Second finding: Interaction between sunlight and temperature
+
+(I was planning on looking at the delay between incident PAR and temperature warming up, as a way to analyze the normalizing effect the tree had on its microclimate, but did not have time.)
+
+
+
+## Third finding: Humidity vs temperature throughout a day
+
+(I was planning on plotting a series of ridge plots but did not have time.)
+
+
+## Stability Check
+
+(I was planning on rerunning the analysis, but this time with removing data that was above 3 volts, but did not have time.)
+
+# Discussion
+
+
+# Conclusion
+
+Off topic...
+
+I spent a lot of time data cleaning and could not organize enough to snap out of it and create the rest of the report. I actually think I cleaned the dataset too much because I cannot think of anything else to clean, and did not have time to generate plots for findings and write the text of the report. 
+
+My grade may not quite be proportional to the amount of sleep I lost in my efforts, but regardless I learned a lot from this experience. I was a little too perfectionist and did not give myself the appropriate time to *be* that perfectionist. 
+
+I'll get them next time! 
+
+# Academic honesty statement
+
+I believe in academic honesty and integrity. I believe that it is essential that what turned in reflects our honest work, because the same attitude ensures the integrity of science. 
+
+
+# Bibliography
+
+[1] Tolle, Gilman, et al. “A Macroscope in the Redwoods.” Proceedings of the 3rd International Conference on Embedded Networked Sensor Systems  - SenSys '05, 2005, doi:10.1145/1098918.1098925. 
