@@ -1,6 +1,6 @@
 ---
 title: "Lab 2 - Linguistics Data, Stat 215A, Fall 2020"
-author: "Your name"
+author: "Omer Ronen"
 date: "`r format(Sys.time(), '%B %d, %Y')`"
 header-includes:
    - \usepackage{float}
