@@ -1,0 +1,380 @@
+---
+title: "Lab 2 - Linguistics Data, Stat 215A, Fall 2020"
+author: "Your name"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+header-includes:
+   - \usepackage{float}
+output: 
+  pdf_document:
+    number_sections: true
+---
+
+
+```{r setup, echo = FALSE, message=FALSE, warning=FALSE}
+# load in useful packages
+remove(list = ls())
+
+library(Rtsne)
+library(maps)
+library(ggplot2)
+library(dplyr)
+library(knitr)
+library(here)
+library(kernlab)
+library(keras)
+library(pander)
+library(grid)
+library(gridExtra)
+
+# set default knitr chunks
+knitr::opts_chunk$set(
+  echo = FALSE,  # don't print the code chunk
+  warning = FALSE,  # don't print warnings
+  message = FALSE,  # don't print messages
+  fig.width = 6,  # set default width of figures
+  fig.height = 4,  # set default height of figures
+  fig.align = "center",  # always align figure in center
+  fig.pos = "H",  # always plot figure at the exact location of the code chunk
+  cache = FALSE)  # don't cache results
+
+# load in the loadData() functions
+source(here("R/utils.R"))
+source(here("R/clean.R"))
+
+ling_data <- read.table(here('data/lingData.txt'), header = T)
+ling_location <- read.table(here('data/lingLocation.txt'), header = T)
+ling_clean <- cleanLingData(ling_data)
+# question_data contains three objects: quest.mat, quest.use, all.ans
+load(here("data/question_data.RData"))
+state_df <- map_data("state")
+
+ling_1h_file <- here('data/ling_1h.csv')
+if (!file.exists(ling_1h_file)){
+ling_1h <- oneHotEncoder(ling_clean, FALSE)
+write.csv(ling_1h, ling_1h_file,  row.names = FALSE)
+}
+ling_1h <- read.csv(ling_1h_file)
+
+```
+
+
+
+
+# Introduction
+
+
+On this lab we will experiment with computational techniques in
+Dialectometry, in particular clustering and dimension reduction.  
+Dialectometry is the study of language variation, on this lab our main focus would be to shed some light on variation determined by geography. The nature of language variation across areas is complex and requires careful analysis hence sophisticated computational methods are needed to gain correct insights.
+Truthful analysis of language variation is particularly useful in understanding historical, social and geographical factors of
+language use in society.
+On this lab we will use data from a Dialect Survey conducted by Bert Vaux and our focus would be questions that look at lexical differences. Our main goal is to find clusters of responses that would be interesting in terms of their geographic properties, to that end we will first re-embed our data into lower dimension and then cluster it using off the shelf methods for both tasks.After obtaining the results, bearing in mind the PCS framework,  we will preform stability analysis.
+
+# The Data
+
+<!-- - What is the data that you will be looking at? -->
+<!-- - Provide a brief overview of the data -->
+<!-- - How is this data relevant to the problem of interest? In other words, make the link between the data and the domain problem -->
+We will investigate the Dialects of American English Survey conducted by Bert Vaux. This datasets contains the responses of 47,471 respondents across the United States along with their self-reported geographical information (state, city and zip code). This is a categorical data set, encoded numerically such that each response choice has a number. We also have an additional dataset with responses aggregated across zip codes.
+The answers to the suvey questions should reflect language variation, combined with the zip code coordinates we can make an attempt in understanding the structure of the joint distribution of the location with the suvey answers.
+
+## Data Cleaning
+
+<!-- - This dataset isn't as bad as the redwood data, but there are still -->
+<!-- some issues. You should discuss them here and describe your strategies -->
+<!-- for dealing with them. -->
+<!-- - Remember to record your pre-processing steps and to be transparent! -->
+
+
+- The first issue was na values for latitude, longtitude and state variables, which were simply removed, since there are so few of them and the geographical information is crucial for out analysis.
+```{r include=FALSE}
+visualizeNas(ling_data)
+```
+
+![Missing values for each respondent.](`r here('data/nas.png')`){width=20%, height=20%}
+
+- Next we had some longitude values that were too small and they were removed as well. Threshold was -125 data points with smaller values were removed. 
+
+```{r,echo=FALSE, out.width='.49\\linewidth', fig.width=6, fig.height=3,fig.show='hold',fig.align='center', fig.cap='Responces for question 50 geographic show few outliers that were removed'}
+questionMap(ling_data,50, theme_classic)
+
+```
+
+- There were also few typos in the state columns in the data, but since the location data seemed valid and there were very few such responses nothing was done.
+
+## Exploratory Data Analysis
+
+The first thing we wanted to understand is the geographic distribution of the respondents, as expected most responses come from big cities. We can also see that east and north areas have much more responces than west and south. 
+
+```{r,echo=FALSE, out.width='.49\\linewidth', fig.width=6, fig.height=3,fig.show='hold',fig.align='center', fig.cap='Two dimentional density of responces over the lat and long variables'}
+
+ggplot(ling_clean) +
+
+  stat_density2d(aes(fill = ..level.., x = long, y = lat), alpha=0.5, geom="polygon")+
+    geom_polygon(aes(x = long, y = lat, group = group),
+                 data = state_df, colour = "black", fill = NA)+
+  theme_void()
+```
+
+
+Next we wanted to look at global statistics and were interested in the general variation of responses, that is since many of the methods are based of metrics similar to variance. The distributions of the first three most frequent answers provides us with an intuition for variance across questions.
+
+```{r,echo=FALSE, out.width='.49\\linewidth', fig.width=8, fig.height=3,fig.show='hold',fig.align='center', fig.cap="Most frequent responses distribution across all questions"}
+plotHighestResponsesPct()
+```
+
+We can see that in many cases a single answer dominates the responses which could be due to the uneven sampling across the states or due to dialects with low variation across the US.
+
+
+We continue with a detailed look into two particular questions
+
+```{r}
+q_num1 <-109
+q1 <- getQuestion(q_num1) 
+q_num2 = 120
+q2 <- getQuestion(q_num2)
+
+df <- cbind( c(q_num1, q_num2) ,c(q1, q2))
+colnames(df) <- c('Question Numner', 'Question')
+
+pander(df, split.cell = 15, style = "grid", caption = "Questions 109 and 120")
+
+```
+
+One way to understand if the answers to the questions define any geographical areas is to check how the local distributions of answers to that particular question is different from the global distribution across the US. 
+For each question we look at the two most answered questions, for each state we calculate the the proportion of respondents who submitted each of the answers - those are the observed proportions.  
+We also calculate the expected proportion under the assumption that the proportion is the same across all states those are the expected proportions under our assumption.
+We present the log of the observed proportions divided by the expected, which is large when the answer appears more often in a particular state than in the total population.  
+The reason this metric was chosen as opposed to simply show the observed proportions is that we are interested in finding area that have distinct dialect compared to the entire population hence that normalization. 
+
+
+```{r,echo=FALSE, out.width='.75\\linewidth', fig.width=15, fig.height=12,fig.show='hold',fig.align='center', fig.cap='Log Odds ratio of the observed response in each state and the expected values under the assumption that all states are identical it terms of answers distribution'}
+plotLogOdds(120)
+plotLogOdds(109, TRUE)
+
+
+```
+
+
+We can that question 109 second response seem to define distinct geographical areas, while the first response does not. Question 120 first two responses doesn't seem to define any geographical area with the distribution similar across states.
+
+
+\newpage
+
+As far as prediction go the most naive thing is to first look at contingency tables
+```{r}
+cont_table = table(ling_data$Q109, ling_data$Q120)
+colnames(cont_table) = c('no answer',as.character(all.ans[[120]]$ans))
+rownames(cont_table) = c('no answer',as.character(all.ans[[109]]$ans))
+
+pander(cont_table, split.cell = 9, style = "grid", caption = "Joint contingency table for questions 109 (rows) and 120 (columns) ")
+```
+
+From the table above it is clear that without additional information those variables and not useful predictors for each other as given any answer to one question the best we can do is predict the most common answer to the other (bag or shotgun). 
+
+# Dimension reduction methods
+
+I will explore three methods for dimension reduction PCA, t-SNE and auto encoders. The reason for choosing those methods is that I wanted to find methods as different from one another as possible, PCA is a linear and parametric methods, t-SNE is non linear and non parametric and auto encoder is non linear and parametric. Additionally using auto encoders allows great flexibility in defining the objective function of the optimization problem, as opposed to PCA and t-SNE where I am restricted optimizing euclidean distance and KL-divergence respectively.
+After obtaining the embedding I will use k-means to cluster each of those methods. 
+
+- PCA  
+
+The first, most obvious choice for dimension reduction is PCA, that we can simply apply to the full dataset (with the one hot encoding). The reason that the one hot (binary) encoding is important is that PCA is the solution of an optimization problem based on euclidean distances. Those distances would change if we were to permutate the ordering of the answers which is not a desired property of an algorithm since the order of the answers is not relevant to our domain question.
+
+
+- t-SNE
+
+The idea behind t-SNE to find an embedding of the data that the distribution of distances on that embedding is similar to the distribution of distance on the original data, the distance we used was the euclidean distance and for that reason, the data that was used is the one hot encoding (same as PCA). Unlike PCA our embedding here is not restricted to linear projection of the original data and if fact we are not restricted in any way. On the other hand the optimization problem here doesn't have a closed form solution and is done using gradient decent which take ling than PCA. I was interested to see if the non parametric model would be able to detect gentle patterns that were not feasible using PCA.
+
+
+- Auto encoders
+
+Auto encoders is a self-supervised method in which a feed forward deep neural network is trained to predict it's own input, one of the layers (called the bottleneck layer) is of lower dimension and represents a compression of the data. We train the network and then use the evaluation of the input on the bottleneck layers as our new embedding. We used a feed-forward network with tanh activation function on each layer, the dimension of the bottleneck was 10 and the dimension of all the other hidden layers is 100. The network was trained on the entire dataset with Adam optimizer for 20 epochs, the loss was mean squared error.
+This is a parametric method, which is not linear since we use non-linear activation this model is much more expressive than PCA but not as expressive as t-SNE so in that respect it'll be interesting to see how they compare. 
+
+
+
+```{r}
+
+
+pca.file <- here('data/pca_embed.csv')
+pca_ling <- getPCA(ling_1h, pca.file)
+
+tsne.file <- here('data/tsne_embed.csv')
+tsne_embed<- getTSNE(ling_1h, tsne.file)
+
+ae.file <- here('data/ae_embed.csv')
+ae_embed <- getAE(ling_1h, ae.file)
+
+```
+
+
+To get an intuition as to how the methods differ in results, we use two dimensional visualization of the embedding obtain by each of the methods:  
+
+- PCA - we show a density plot of the first two principal components  
+
+- t-SNE - we choose to reduce the data to a two dimensional sub-space, so we simply show the density of this embedding  
+
+- Auto encoder - we use PCA on the Auto encoder embedding (10 dimensional) and show the density of the first two principal components.  
+
+
+
+```{r,echo=FALSE, out.width='.49\\linewidth', fig.width=2, fig.height=2,fig.show='hold',fig.align='center', fig.cap="Visualization of the data embedding for the three dimention reduction methods: PCA, t-SNE and Auto encoder"}
+
+
+# PCA
+
+
+pca_ling %>% ggplot(aes(x=PC1, y=PC2)) + 
+  stat_density2d(aes(fill = ..level..), alpha=0.5, geom="polygon", show.legend = FALSE) +
+  theme_minimal() + ggtitle('PCA')
+
+# t-SNE
+as.data.frame(tsne_embed) %>% ggplot(aes(x=T1, y=T2)) + 
+  stat_density2d(aes(fill = ..level..), alpha=0.5, geom="polygon",show.legend = FALSE) +
+  theme_minimal()+ ggtitle('t-SNE')
+
+# A-E
+pca_ae <- getPCA(ae_embed, here('data/ae_embed_pca.csv'))
+as.data.frame(pca_ae) %>% ggplot(aes(x=PC1, y=PC2)) + 
+  stat_density2d(aes(fill = ..level..), alpha=0.5, geom="polygon", show.legend = FALSE) +
+  theme_minimal()+ ggtitle('Auto Encoder')
+
+```
+
+Looking at those density plots we note that: 
+
+* the data doesn't seem to have any distinct clusters, which I don't find surprising because it was explicitly stated so in the 2003 paper "The earliest works in dialectology showed that language variation is complex both geographically and linguistically and cannot be reduced to simple characterizations.".  
+
+* The t-SNE embedding seem to have more clusters that Auto encoder and PCA (the density have more peaks).
+
+## Clustering
+
+The next step is to cluster the data for the three embeddings we obtained. 
+
+```{r,echo=FALSE, out.width='.49\\linewidth', fig.width=2, fig.height=2,fig.show='hold',fig.align='center', fig.cap="Clusters produced by applying k-means (for k=3,4) to each of the reduced dimention datasets, different colors indicate different clusters"}
+
+plotCluster(ae_embed, 3, 'Auto Encoder\n(3 clusters)')
+plotCluster(pca_ling, 3, 'PCA (3 clusters)')
+plotCluster(tsne_embed, 3, 't-SNE  (3 clusters)')
+
+plotCluster(ae_embed, 4, 'Auto Encoder\n(4 clusters)')
+plotCluster(pca_ling, 4, 'PCA (4 clusters)')
+plotCluster(tsne_embed, 4, 't-SNE  (4 clusters)')
+
+plotCluster(ae_embed, 5, 'Auto Encoder\n(5 clusters)')
+plotCluster(pca_ling, 5, 'PCA (5 clusters)')
+plotCluster(tsne_embed, 5, 't-SNE  (5 clusters)')
+
+```
+
+Few interesting things to note:
+
+* Looking at the different clusters we can note that for the choice of 3 clusters all methods produced similar results, which makes a stronger claim for us to believe those areas have a common dialect.
+
+* PCA doesn't seem to have a forth cluster in the data which can be explained by the linearity limitation.  
+
+* t-SNE seem to capture the west coast cluster as the forth one where the auto encoder seemed to learn distances that are not geographically meaningful, it would be interesting to see if changing the loss function of the auto encoder may produce similar results as t-SNE in terms of clustering. 
+
+* We focus on 3,4 and 5 clusters since adding more clusters did not add any clusters that make sense geographically, and using less is not very interesting.
+
+\newpage
+
+Shifting back to the domain problem we would like to be able to identify the questions that separate the clusters, as they indicate the language variation. To the end we look at the three clusters formed by t-SNE and k-means and pick a few questions for which the most common answer is not the same in all clusters. Those questions are probably the ones that separate the clusters.
+
+```{r echo=FALSE, fig.cap='Five question for which the most common answer is different among the clusters'}
+Clusters <- getClusters(tsne_embed,3)
+c1 <- ling_clean[Clusters==1, c(5:71)]
+c2 <- ling_clean[Clusters==2, c(5:71)]
+c3 <- ling_clean[Clusters==3, c(5:71)]
+
+.getFrequentRespose <- function(ds){
+df <- apply(ds,2,function(x) names(which.max(table(x))))
+df_numeric <- data.frame(as.numeric(df))
+return(df_numeric)
+}
+c_1 <- cbind(.getFrequentRespose(c1), rep('c1', length(.getFrequentRespose(c1))))
+c_2 <- cbind(.getFrequentRespose(c2), rep('c2', length(.getFrequentRespose(c2))))
+c_3 <- cbind(.getFrequentRespose(c3), rep('c3', length(.getFrequentRespose(c3))))
+
+frequent_answers <- cbind(.getFrequentRespose(c1), .getFrequentRespose(c2), .getFrequentRespose(c3))
+colnames(frequent_answers) <- c('cluster 1', 'cluster 2', 'cluster 3')
+frequent_answers$Q <-as.numeric(substr(colnames(ling_clean[, c(5:71)]), 2, 4))
+
+frequent_answers <- frequent_answers[apply(frequent_answers,1, function(x) length(unique(x))>2), ]
+for (q in frequent_answers$Q){
+  row = frequent_answers$Q==q
+ frequent_answers[row, c(1:3)] = all.ans[[q]]$ans[as.numeric(frequent_answers[row, c(1:3)])]
+ frequent_answers[row, 4] = quest.mat$quest[q]
+}
+
+# kable(head(frequent_answers, 10), "latex") %>%
+#   column_spec(1, width = "5em")
+
+rownames(frequent_answers) = frequent_answers$Q
+frequent_answers = frequent_answers[, c(1:3)]
+pander(head(frequent_answers,7), split.cell = 15, style = "grid", caption = "Question for which the most common answer is different among the clusters")
+# frequent_answers %>% ggplot(aes(x=Q))+
+#   geom_point(aes(y=`cluster 1`, color='blue'))+
+# geom_point(aes(y=`cluster 2`, color='red'))+
+#   geom_point(aes(y=`cluster 3`, color='green'))
+```
+
+# Stability of findings to perturbation
+
+On this section we'll focus on the t-SNE based clustering with five clusters and try to understand if this finding is stable or simply luck. To that end we'll run t-SNE two more times bootstrapping our dataset. For each of those runs we'll use different starting point for gradient decent as well as k-means and we'll see how the results compare to the original ones (with new k-mean initialization).
+
+```{r,echo=FALSE, out.width='.49\\linewidth', fig.width=2, fig.height=2,fig.show='hold',fig.align='center', fig.cap="Five clusters obtained by using t-SNE and k-means for our original data and two bootstrap datasets"}
+
+
+.getPertubTsne <- function(ds, tsne_file, pertub_file){
+tsne.file.1 <- tsne_file
+ling_1h_1_fname <-pertub_file
+
+if (!file.exists(ling_1h_1_fname)){
+ling_1h_1 <- ling_1h[sample(nrow(ling_1h),size=30000,replace=TRUE),]
+ write.csv(ling_1h_1,ling_1h_1_fname,   row.names = FALSE)
+}
+ling_1h_1 = read.csv(ling_1h_1_fname)
+tsne_embed_1<- getTSNE(ling_1h_1, tsne.file.1)
+return(tsne_embed_1)}
+
+
+tsne.file.1<- here('data/tsne_embed_1.csv')
+ling_1h_1_fname <- here('data/ling_1h_1.csv')
+
+tsne.file.2 <- here('data/tsne_embed_2.csv')
+ling_1h_2_fname <- here('data/ling_1h_2.csv')
+
+tsne_embed_1 <- .getPertubTsne(ling_1h, tsne.file.1, ling_1h_1_fname)
+tsne_embed_2 <- .getPertubTsne(ling_1h, tsne.file.2, ling_1h_2_fname)
+
+
+
+
+plotCluster(tsne_embed, 5, 'Original')
+plotCluster(tsne_embed_1, 5, 'First perturbation')
+plotCluster(tsne_embed_2, 5, 'Second perturbation')
+
+
+```
+
+We can see that in one of the perturbations we performed we obtain similar, geographically meaningful, clusters and that in the other we "lost" one of the clusters. We can also see that changing the k-means initialization did not change the resulting cluster significantly.  
+I think that doing two perturbations is not enough to reach a conclusion, my intuition is that if we were to perform many more we would see meaningful clusters in many cases. As my computer is not suitable for running so many calculation I can not know this for sure so it remains a speculation.
+
+# Conclusion
+
+As far as I understand the clusters we were able to find a common sense to most Americans so in that respect we didn't shed any light on new discoveries. I think what we can take forward is that clustering methods are able to extract similarities from linguistic data sets and perhaps can be useful in future research, for example if two areas appear consistently over many perturbations on the same cluster it may be interesting to understand why.  
+
+The reality check I did, as non-American, was to show the results to a few people in my class and ask them if that makes sense to them, I think the next step would be to consult experts in the field for interpretation of results and understand if they are aligned with what they know.
+
+Given more time I would probably play some more with Auto encoder and see if other loss functions can produce interesting cluster as well as player with hyper=parameters (number of layers, dimension, learning rate, etc...). 
+I would also so a more through stability check on the t-SNE results, as well as see what happens if we play with the hyper-parameters of this model (mainly the dimension we project to).
+
+<!-- - Discuss the three realms of data science by answering the questions in the instructions pdf. -->
+<!-- - Come up with a reality check that would help you to verify your clustering. You do not necessarily have to perform this reality check, but you can if doable. -->
+<!-- - What are the main takeaways from your exploration/clustering/stability analysis? -->
+
+# Academic Integrity Statement
+
+- Please include your statement here. Do NOT include your name, to avoid putting it in the lab2_blind.pdf document.
