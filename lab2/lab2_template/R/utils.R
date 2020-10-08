@@ -63,9 +63,17 @@ getQuestion <- function(number){
   
 }
 
-plotLogOdds <- function(q_num, show_legned=FALSE){
-  p1<-.plotLogOdds(ling_1h, q_num, ling_clean$STATE, 1)
-  p2 <- .plotLogOdds(ling_1h, q_num, ling_clean$STATE, 2)
+plotLogOdds <- function(q_num, show_legned=FALSE, answers = c()){
+  ind_1 = 1
+  ind_2 = 2
+  if (length(answers)>0){
+    ind_1 = which(order(all.ans[[q_num]]$per, decreasing = T)==answers[1])
+    ind_2 = which(order(all.ans[[q_num]]$per, decreasing = T)==answers[2])
+    
+    }
+    
+  p1<-.plotLogOdds(ling_1h, q_num, ling_clean$STATE, ind_1)
+  p2 <- .plotLogOdds(ling_1h, q_num, ling_clean$STATE, ind_2)
   p2_l <- .plotLogOdds(ling_1h, q_num, ling_clean$STATE, 2, TRUE)
   
   .extract_legend <- function(my_ggp) {

@@ -302,6 +302,15 @@ colnames(frequent_answers) <- c('cluster 1', 'cluster 2', 'cluster 3')
 frequent_answers$Q <-as.numeric(substr(colnames(ling_clean[, c(5:71)]), 2, 4))
 
 frequent_answers <- frequent_answers[apply(frequent_answers,1, function(x) length(unique(x))>2), ]
+
+l <- list()
+i=1
+for (q in frequent_answers$Q[c(1:3)]){
+  is.q <- frequent_answers$Q == q
+  l[[i]] <- c(q, unique(as.numeric(frequent_answers[is.q ,c(1:3)])))
+  i<- i+1
+}
+
 for (q in frequent_answers$Q){
   row = frequent_answers$Q==q
  frequent_answers[row, c(1:3)] = all.ans[[q]]$ans[as.numeric(frequent_answers[row, c(1:3)])]
@@ -314,11 +323,28 @@ for (q in frequent_answers$Q){
 rownames(frequent_answers) = frequent_answers$Q
 frequent_answers = frequent_answers[, c(1:3)]
 pander(head(frequent_answers,7), split.cell = 15, style = "grid", caption = "Question for which the most common answer is different among the clusters")
+
 # frequent_answers %>% ggplot(aes(x=Q))+
 #   geom_point(aes(y=`cluster 1`, color='blue'))+
 # geom_point(aes(y=`cluster 2`, color='red'))+
 #   geom_point(aes(y=`cluster 3`, color='green'))
 ```
+
+
+We can also repeat the log odd analysis for some of those questions
+
+```{r,echo=FALSE, out.width='.75\\linewidth', fig.width=15, fig.height=12,fig.show='hold',fig.align='center', fig.cap='Log odds ratio for three of our suspected seperating questions'}
+for (i in l){
+plotLogOdds(i[1], answers=i[2:3])}
+
+
+```
+
+- The first question stands out in terms of geographical separation, we see that "y'all" is much more common in the south as opposed to other areas, "you guys" displays the opposite behavior, it is important to note that less than 50% of the respondents submitted one of the two answers so we cannot know who the rest of the respondents fit in terms of this geographical separation.    
+
+- The second question does not seem to have an interesting distribution, it may be noise or contribution through interaction with other questions.   
+
+- The third question has a more balanced distribution than the first, on a larger percent of the respondents hence it does seem to hold valuable information for clustering that is also geographically meaningful.
 
 # Stability of findings to perturbation
 
@@ -377,4 +403,4 @@ I would also so a more through stability check on the t-SNE results, as well as 
 
 # Academic Integrity Statement
 
-- Please include your statement here. Do NOT include your name, to avoid putting it in the lab2_blind.pdf document.
+- I state that is work is my own and that I didn't copy or cheat in any way. I value academic integrity highly and I think that only benefits me as a students to work hard and use this lab to learn and develop as a scientist
