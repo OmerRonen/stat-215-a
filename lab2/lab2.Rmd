@@ -272,9 +272,9 @@ Few interesting things to note:
 
 * Looking at the different clusters we can note that for the choice of 3 clusters all methods produced similar results, which makes a stronger claim for us to believe those areas have a common dialect.
 
-* PCA doesn't seem to have a forth cluster in the data which can be explained by the linearity limitation.  
+* PCA doesn't seem to have a forth or fifth cluster in the data which can be explained by the linearity limitation.  
 
-* t-SNE seem to capture the west coast cluster as the forth one where the auto encoder seemed to learn distances that are not geographically meaningful, it would be interesting to see if changing the loss function of the auto encoder may produce similar results as t-SNE in terms of clustering. 
+* t-SNE seem to capture a forth and fifth clusters whereas the auto encoder seemed to learn distances that are not geographically meaningful. It would be interesting to see if changing the loss function of the auto encoder may produce similar results as t-SNE in terms of clustering. 
 
 * We focus on 3,4 and 5 clusters since adding more clusters did not add any clusters that make sense geographically, and using less is not very interesting.
 
