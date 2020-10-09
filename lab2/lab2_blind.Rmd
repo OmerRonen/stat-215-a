@@ -143,7 +143,7 @@ pander(df, split.cell = 15, style = "grid", caption = "Questions 109 and 120")
 
 One way to understand if the answers to the questions define any geographical areas is to check how the local distributions of answers to that particular question is different from the global distribution across the US. 
 For each question we look at the two most answered questions, for each state we calculate the the proportion of respondents who submitted each of the answers - those are the observed proportions.  
-We also calculate the expected proportion under the assumption that the proportion is the same across all states those are the expected proportions under our assumption.
+We also calculate the expected proportion under the assumption that the proportion is the same across all states those are the expected proportions under our assumption  (in the spirit of FIsher's exact test calculation).
 We present the log of the observed proportions divided by the expected, which is large when the answer appears more often in a particular state than in the total population.  
 The reason this metric was chosen as opposed to simply show the observed proportions is that we are interested in finding area that have distinct dialect compared to the entire population hence that normalization. 
 

@@ -20,9 +20,11 @@ oneHotEncoder <- function(ling_dataset, weighting=FALSE){
     column_names = paste(question_number, answers, sep = '_A')
     colnames(one_hot) <- column_names
     if (0 %in% answers){
+      # we remove the no answer category
       one_hot <- one_hot[, c(2:length(answers))]
     }
     if (weighting)
+      # this was not used - please ignore
       {one_hot = exp(1-answers_frequencey) * one_hot}
     if (q==5){
       ling_1h = one_hot
@@ -35,6 +37,7 @@ return(ling_1h)
 
 
 .getLogOdds <- function(ds, q_num, states_vec){
+  # calculate the log-odds per state using the contingency table.
   question <- .getQuestionString(q_num)
   ds$STATE <- states_vec
   
@@ -58,12 +61,14 @@ return(ling_1h)
 }
 
 getQuestion <- function(number){
+  # get question string from number
   q <- quest.mat$quest[quest.mat$qnum==number]
   return(q)
   
 }
 
 plotLogOdds <- function(q_num, show_legned=FALSE, answers = c()){
+  # plots the log odds for two answer of a single question
   ind_1 = 1
   ind_2 = 2
   if (length(answers)>0){
@@ -75,7 +80,7 @@ plotLogOdds <- function(q_num, show_legned=FALSE, answers = c()){
   p1<-.plotLogOdds(ling_1h, q_num, ling_clean$STATE, ind_1)
   p2 <- .plotLogOdds(ling_1h, q_num, ling_clean$STATE, ind_2)
   p2_l <- .plotLogOdds(ling_1h, q_num, ling_clean$STATE, 2, TRUE)
-  
+  # we want a shared legend
   .extract_legend <- function(my_ggp) {
     step1 <- ggplot_gtable(ggplot_build(my_ggp))
     step2 <- which(sapply(step1$grobs, function(x) x$name) == "guide-box")
@@ -96,6 +101,7 @@ plotLogOdds <- function(q_num, show_legned=FALSE, answers = c()){
 }
 
 .plotLogOdds <- function(ds, q_num, states_vec, freq_order, show_legend=FALSE){
+  # plot the log odds for a single answer
   log_odds <- .getLogOdds(ds,q_num,states_vec)
   log_odds <- log_odds[!is.na(log_odds$region), ]
   question <- .getQuestionString(q_num)
@@ -126,6 +132,7 @@ plotLogOdds <- function(q_num, show_legned=FALSE, answers = c()){
 
 
 .getQuestionString <- function(q_num){
+  # get the question string 50 -> `Q050`
   question_numebr <- as.character(q_num)
   if (nchar(question_numebr)<3){
     question_numebr <- paste('0', as.character(question_numebr), sep = '')
@@ -135,6 +142,7 @@ plotLogOdds <- function(q_num, show_legned=FALSE, answers = c()){
 }
 
 questionMap <- function(ling_dataset, n_q, plot_theme, answers_exclude = c()){
+  # scatter plot for each answer of a question on the us map
   answers_exclude = as.character(answers_exclude)
   question  = quest.mat$quest[n_q]
   answers <- all.ans[[n_q]]
@@ -174,7 +182,8 @@ questionMap <- function(ling_dataset, n_q, plot_theme, answers_exclude = c()){
 
 plotHighestResponsesPct  <- function(){
   c_names = c('Percent','Order')
-  l = length(all.ans)
+  l <- length(all.ans)
+
   values_1st <- data.frame(unlist(lapply(all.ans, .extractMax, n=1)), rep('First', l))
   values_2nd <- data.frame(unlist(lapply(all.ans, .extractMax, n=2)), rep('Second', l))
   values_3rd <- data.frame(unlist(lapply(all.ans, .extractMax, n=3)), rep('Third', l))
@@ -183,17 +192,21 @@ plotHighestResponsesPct  <- function(){
   colnames(values_2nd) <- c_names
   colnames(values_3rd) <- c_names
   
-  df = rbind(values_1st,values_2nd, values_3rd)
-
+  df <- rbind(values_1st,values_2nd, values_3rd)
+  title <-  'Distribution of the first second and 
+  third most common answers accross survey questions'
   # basic histogram
-  df %>% ggplot(aes(x=Percent, color=Order)) + ggtitle('Distribution of the first second and third most common answers accross survey questions')+
+  df %>% ggplot(aes(x=Percent, color=Order)) +
+    ggtitle(title)+
     geom_boxplot() + theme_minimal() + 
-    theme(plot.title = element_text(size = 8, face = "bold"),axis.ticks.y=element_blank(),axis.text.y = element_blank())
+    theme(plot.title = element_text(size = 8, face = "bold"),
+          axis.ticks.y=element_blank(),axis.text.y = element_blank())
 }
 
 
 
 getPCA <- function(data, filename){
+  # returns PCA embedding
   if (!file.exists(filename)){
   pca <- prcomp(data,scale=FALSE)
   pca_df <- data.frame(pca$x)
@@ -205,13 +218,17 @@ getPCA <- function(data, filename){
   }
 
 getClusters <- function(ds, centres){
+  # returhns the k-means clusters vector
   k_means <- kmeans(ds, centres,nstart=3)
   return(as.factor(k_means$cluster))
 }
 
 getTSNE <- function(data, filename){
+  # Returns t-SNE embedding
 if (!file.exists(filename)){
-  tsne <- Rtsne(ling_1h, dims = 2, perplexity=30, verbose=TRUE, max_iter = 500, check_duplicates=FALSE, pca=FALSE)
+  tsne <- Rtsne(ling_1h, dims = 2, perplexity=30,
+                verbose=TRUE, max_iter = 500,
+                check_duplicates=FALSE, pca=FALSE)
   tsne_embed <- as.data.frame(tsne$Y)
   colnames(tsne_embed)<- c('T1', 'T2')
   write.csv(tsne_embed,filename, row.names = FALSE)}
@@ -221,6 +238,7 @@ tsne_embed <- read.csv(filename)
 return(tsne_embed)}
 
 getAE <- function(data, filename){
+  #Returns Auto Encoder embedding
   if (!file.exists(filename)){
     x_train <- as.matrix(ling_1h)
     model <- keras_model_sequential()
@@ -234,8 +252,7 @@ getAE <- function(data, filename){
       
       layer_dense(units = ncol(x_train))
     # view model layers
-    summary(model)
-    
+
     model %>% compile(
       loss = "mean_squared_error",
       optimizer = "adam"
@@ -249,7 +266,8 @@ getAE <- function(data, filename){
       validation_split = 0.2
     )
     
-    ae_model <- keras_model(inputs = model$input, outputs = get_layer(model, "bottleneck")$output)
+    ae_model <- keras_model(inputs = model$input,
+                            outputs = get_layer(model, "bottleneck")$output)
     
     ae_embed <- predict(ae_model, x_train)
     
@@ -262,6 +280,7 @@ getAE <- function(data, filename){
 
 
 plotCluster <- function(ds, n_clusters, dr_method){
+  #Plot the cluster on the us map
   Clusters <- getClusters(ds,n_clusters)
   ling_clean%>%ggplot(aes(x = long, y = lat, color=Clusters)) +
     
