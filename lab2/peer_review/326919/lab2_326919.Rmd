@@ -1,0 +1,421 @@
+---
+title: "Lab 2 - Linguistics Data, Stat 215A, Fall 2020"
+author: ""
+date: "10/8/20"
+header-includes:
+   - \usepackage{float}
+output: 
+  pdf_document:
+    number_sections: true
+---
+
+```{r setup, echo = FALSE, message=FALSE, warning=FALSE}
+library(knitr)
+library(tidyverse)
+library(dummies)
+library(fastDummies)
+library(NMF)
+library(maps)
+library(ggmap)
+library(mapdata)
+library(Rtsne)
+library(cowplot)
+# set default knitr chunks
+knitr::opts_chunk$set(
+  echo = FALSE,  # don't print the code chunk
+  warning = FALSE,  # don't print warnings
+  message = FALSE,  # don't print messages
+  fig.width = 6,  # set default width of figures
+  fig.height = 4,  # set default height of figures
+  fig.align = "center",  # always align figure in center
+  fig.pos = "H",  # always plot figure at the exact location of the code chunk
+  cache = FALSE)  # don't cache results
+
+source('R/plot_fns.R')
+```
+
+# Introduction
+
+Language is fundamental to the human experience. It allows us to communicate complex thoughts and ideas to each other while maintaining our identity and sense of self. Dialectology studies dialects, the different spoken varieties of the same language, and dialectometry aims to use computational methods in dialectology. This report aims to understand how clustering methods can be applied to dialectometry. To this end, we will investigate how a few questions relate to geography, apply several clustering methods, and test the stability of one interesting clustering result. In the domain context, we hope to discover groups of people with similar dialects and understand other similarities within those groups, namely geographic.
+
+# The Data
+
+The data come from a survey of preferred terms, phrases, and pronunciations conducted across the United States. The survey includes more than one hundred questions, but the data contain 71 of these questions. These questions include both pronunciations and phrase usage, two important parts of distinguishing dialects. Nearly fifty thousand people were surveyed. The data are directly related to the domain by giving a look at the dialects of people across the country. 
+
+## Data Cleaning
+
+```{r load-data, eval = FALSE, echo = FALSE, message=FALSE, warning=FALSE, cache= TRUE}
+load('data/question_data.RData')
+ling_orig <- read.table('data/lingData.txt', header=TRUE)
+lingloc_orig <- read.table('data/lingLocation.txt', header=TRUE)
+states = map_data('state')
+```
+
+The dataset is mostly full and does not contain many severe gaps. However, there are several rows that contain little information to no information. In these rows, the survey participant did not answer many of the questions, so the row contains mostly zeros. These errors are removed in the process of analyzing data, dimension reduction, and clustering, so I did not clean the data up front. For example, when doing PCA, rows with only zeros are removed. I will describe the data processing for each task in their respect sections.
+
+Another issue with the data is the most common answers to several questions is 'other', 'I have no preference', or something similar. The data from these rows appear as though they contribute information, but vague answers do not give a better understanding of the dialect. However, this issue cannot be rectified post-hoc.
+
+## Exploratory Data Analysis
+
+To determine which questions I though were interesting, I looked through the list of questions in `quest.use`. The first two that seemed interesting to me were questions 66 and 121. Question 66 is 'What do you call a miniature lobster found in lakes and rivers?' and 121 is 'What do you call gawking at someone lustfully?' I found 66 interesting because I've heard the most common answers (crawfish, crawdad, crayfish) used interchangeably in the South where I'm from. For 121, I didn't think there were multiple answers, so I hoped to find out where the distinction lies. I later added question 100 ('Do you cut or mow the lawn or grass?') after doing some clustering and seeing that the questions I chose did not entirely reflect the clusters I discovered. 
+
+```{r Figure 1, echo = FALSE, message=FALSE, warning=FALSE, cache= TRUE, out.height = '75%', out.width = '75%', fig.cap = 'Map of the most common answers for questions 66, 100, and 121'}
+knitr::include_graphics('images/quest_plot_geo.png')
+```
+
+```{r plot-questions, eval = FALSE, echo = FALSE, message=FALSE, warning=FALSE, cache= TRUE}
+#Code to get above images
+smp <- smp(1:35000, size = 7000, replace = F)
+
+aq66 <- all.ans[['66']]
+aq66$Q066 <- rownames(aq66)
+data_q66 <- ling_orig %>% mutate(Q066 = as.character(Q066)) %>%
+  filter(long > -125, Q066 %in% c(1,2,5)) 
+data_q66 <- inner_join(data_q66, aq66, by = 'Q066')
+
+plt_q66 <- data_q66[smp,] %>%
+  ggplot() +
+  geom_polygon(data=states, aes(x=long, y=lat, group=group),
+               color='black', fill='NA') +
+  geom_point(aes(x=long, y=lat, color=ans), 
+             size=0.3, alpha=0.75) +
+  theme_minimal() +
+  labs(color = '',
+       title = 'What do you call a miniature lobster? (66)') +
+  theme(axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(), axis.text.x = element_blank(),
+        axis.title.y = element_blank(), axis.ticks.y = element_blank(), 
+        axis.text.y = element_blank(),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank())
+
+aq121 <- all.ans[['121']]
+aq121$Q121 <- rownames(aq121)
+aq121$ans <- as.character(aq121$ans)
+aq121[3, 'ans'] <- 'oggle'
+aq121$ans <- as.factor(aq121$ans)
+data_q121 <- ling_orig %>% 
+  mutate(Q121 = as.character(Q121)) %>%
+  filter(long > -125, Q121 %in% c(1,2,3)) 
+data_q121 <- inner_join(data_q121, aq121, by = 'Q121')
+
+plt_q121 <- data_q121[smp,] %>%
+  ggplot() +
+  geom_polygon(data=states, aes(x=long, y=lat, group=group),
+               color='black', fill='NA') +
+  geom_point(aes(x=long, y=lat, color=ans),
+             size=0.3, alpha=0.75) +
+  theme_minimal() +
+  labs(color = '', 
+       title = 'What do you call gawking at someone? (100)') +
+  theme(axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(), axis.text.x = element_blank(),
+        axis.title.y = element_blank(), axis.ticks.y = element_blank(), 
+        axis.text.y = element_blank(),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank())
+
+aq100 <- all.ans[['100']]
+aq100$Q100 <- rownames(aq100)
+data_q100 <- ling_orig %>% mutate(Q100 = as.character(Q100)) %>%
+  filter(long > -125, Q100 %in% c(1,4))
+data_q100 <- inner_join(data_q100, aq100, by = 'Q100')
+
+plt_q100 <- data_q100[smp,] %>%
+  ggplot() +
+  geom_polygon(data=states, aes(x=long, y=lat, group=group),
+               color='black', fill='NA') +
+  geom_point(aes(x=long, y=lat, color=ans), 
+             size=0.3, alpha=0.75) +
+  theme_minimal() +
+  labs(color = '', 
+  title = 'Do you cut or mow the grass or lawn? (121)') +
+  theme(axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(), axis.text.x = element_blank(),
+        axis.title.y = element_blank(), axis.ticks.y = element_blank(), 
+        axis.text.y = element_blank(),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank())
+
+plot_grid(plt_q66, plt_q100, plt_q121, ncol = 1)
+```
+
+To plot the questions meaningfully, I only plotted the most common answers which I defined to be answers with at least ten percent of survey population. We can see from the maps above that 66 and 100 have significant geographic biases. In particular, we can see a distinct split between the south, midwest, and north in 66: southerners tend to use crawfish, northerners crayfish, and midwesterners crawdad. However, in both 66 and 100 there is mixing in several states, notably the area around West Virginia, Pennsylvania, and Ohio. The answers to 121 don't seem to have much relation to geography. These maps help us see that there is some geographic encoding in some of the answers, but some answers do not depend on geography.  
+
+# Dimension reduction methods
+
+To start out, I decided to try as many dimension reduction techniques as I could, even techniques whose assumptions I think fail. I wanted to get an idea of how the data are structured, and figuring out which dimension reduction techniques work was a part of my process. 
+
+The first step in many dimension reduction techniques is deciding whether or not to scale the data. I decided to try both, but I feel that scaling is not necessarily appropriate in the domain context Our data are binary and scaling the data ignores this fact. It can be argued that scaling the data can help to represent the continuum of language rather than the binary that the data present, but the survey does not allow us the information to make this leap. 
+
+It is also important to note that I do not feel that the data squarely fit the assumptions of all of the techniques I used. As a result, I operated on the basis of the data being 'good enough' for the methods I used. However, 'good enough' in this report is guided more by convenience and time than by empirical rigor. 
+
+First, I tried PCA. PCA is the most commonly used method of all, and here it was the easiest to implement. I looked into both scaled and unscaled results as shown in Figure 2. 
+
+```{r prep-data, eval = FALSE, echo = FALSE, message=FALSE, warning=FALSE, cache= TRUE}
+switch_cols <- colnames(ling_orig)
+switch_cols <- switch_cols[5:(length(switch_cols)-2)]
+
+ling1 <- ling_orig %>% drop_na() %>% 
+  mutate(across(switch_cols, as.factor)) %>%
+  dummy.data.frame(names = switch_cols, sep='.') %>% 
+  select(-ends_with('.0'))
+ling_noloc <- ling1 %>% 
+  select(-c('ID','STATE','CITY','ZIP', 'lat','long'))
+ling_loc <- ling1[which(rowSums(ling_noloc) > 0),]
+ling_noloc <- ling_noloc[which(rowSums(ling_noloc) > 0),] 
+
+tsne_loc <- ling_loc[!duplicated(ling_noloc),]
+ling_unique <- ling_noloc %>% distinct() %>% scale()
+
+tsne_pca <- read.csv('other/tsne_pca_results.csv')
+tsne_np <- read.csv('other/tsne_nopca_results.csv')
+```
+
+```{r pca, eval = FALSE, echo = FALSE, message=FALSE, warning=FALSE, cache= TRUE}
+ling_pca_us <- prcomp(ling_noloc, center=F, scale=F)
+ling_pca_s <- prcomp(ling_noloc, center=T, scale=T)
+```
+
+```{r Figure 2, echo = FALSE, message=FALSE, warning=FALSE, cache= TRUE, fig.cap = 'Unscaled and Scaled PCA', out.height = '75%', out.width = '75%'}
+knitr::include_graphics('images/pca_plot.png')
+```
+
+```{r plot-pca, eval = FALSE, echo = FALSE, message=FALSE, warning=FALSE, cache= TRUE}
+#Code for above plots
+pca_us_plot <- as.data.frame(ling_pca_us$x) %>% ggplot() +
+  geom_point(aes(x=PC1,y=PC2), shape='o', alpha=0.5) +
+  theme_minimal()
+pca_s_plot <- as.data.frame(ling_pca_s$x) %>% ggplot() +
+  geom_point(aes(x=PC1,y=PC2), shape='o', alpha=0.5) +
+  theme_minimal()
+
+plot_grid(pca_us_plot, pca_s_plot, 
+          labels = c('Unscaled', 'Scaled'), 
+          nrow = 1)
+```
+
+It seems that the scaled version does a better job of reducing the dimensions and showing us the shape of the data. We can see potentially three clusters already from the scaled PCA plot. The unscaled plot on the other hand does not show us much in terms of potential clusters. We can only see one central group flanked by a few dozen stragglers. For these reasons I decided to use scaled PCA to plot results in later analyses.
+
+Next we tried t-SNE. t-SNE is more difficult to work with because it requires choosing hyperparameters, but it has shown promise when properly tuned. t-SNE is sometimes implemented with PCA, so we included both t-SNE with PCA and t-SNE without PCA.
+
+```{r Figure 3, fig.cap = 't-SNE w/ PCA', echo = FALSE, message=FALSE, warning=FALSE, cache= TRUE, out.height = '75%', out.width = '75%'}
+knitr::include_graphics('images/tsne_pca_plot.png')
+```
+
+```{r Figure 4, fig.cap = 't-SNE w/o PCA', echo = FALSE, message=FALSE, warning=FALSE, cache= TRUE, out.height = '75%', out.width = '75%'}
+knitr::include_graphics('images/tsne_np_plot.png')
+```
+
+```{r tsne-plots, eval = FALSE, cho = FALSE, message=FALSE, warning=FALSE, cache= TRUE}
+tsne_pus_plot <- tsne_pca %>% ggplot() +
+  geom_point(aes(x=unscaled_v1, y=unscaled_v2),
+             shape = 'o', alpha = 0.5) +
+  theme_minimal() + 
+  labs(x = 'V1', y = 'V2')
+tsne_ps_plot <- tsne_pca %>% ggplot() +
+  geom_point(aes(x=scaled_v1, y=scaled_v2), 
+             shape = 'o', alpha = 0.5)+
+  theme_minimal() + 
+  labs(x = 'V1', y = 'V2') 
+
+tsne_p_pg <- plot_grid(tsne_pus_plot, tsne_ps_plot, 
+          labels = c('Unscaled', 'Scaled'),
+          nrow = 1)
+tsne_npus_plot <- tsne_np %>% ggplot() +
+  geom_point(aes(x=unscaled_v1, y=unscaled_v1.1),
+             shape = 'o', alpha = 0.5) +
+  theme_minimal() + 
+  labs(x = 'V1', y = 'V2')
+tsne_nps_plot <- tsne_np %>% ggplot() +
+  geom_point(aes(x=scaled_v1, y=scaled_v2), 
+             shape = 'o', alpha = 0.5)+
+  theme_minimal() + 
+  labs(x = 'V1', y = 'V2') 
+
+tsne_np_pg <- plot_grid(tsne_npus_plot, tsne_nps_plot, 
+          labels = c('Unscaled', 'Scaled'),
+          nrow = 1)
+```
+
+```{r tsne, eval = FALSE, echo = FALSE, message=FALSE, warning=FALSE, cache= TRUE}
+#WARNING!!!
+#This will take a while to run; 
+#I've saved the result of one run instead
+#Proceed with caution...
+
+ling_tsne_s <- Rtsne(ling_unique, dims=2, perplexity=100, maxiter=5000)
+ling_tsne_us <- Rtsne(ling_unique, dims=2, perplexity=100, maxiter=5000,
+                      pca_scale=F, pca_center=F)
+
+ling_tsne_s_np <- Rtsne(ling_tsne_s_np, dims=2, 
+                        perplexity=100, maxiter=5000, pca=F)
+ling_tsne_us_np <- Rtsne(ling_tsne_us_np, dims=2, 
+                         perplexity=100, maxiter=5000,pca=F)
+```
+
+From Figure 3 we can see that t-SNE is attempting to find sub-groups within the larger overall group. In the scaled plot we can see a few groups separating away, and in the unscaled plot we can see some areas with higher density. If we compare these result with Figure 4, we can see a stark difference. Scaled t-SNE without PCA seems to be finding groups and pulling them out of the large central group. Because t-SNE does not preserve local structure, there may be hundreds of points in what seems like only a few dozen spots. PCA may be doing some regularizing here, preventing t-SNE from looking too deeply into the data.
+
+# Clustering
+
+I tested clustering using a variety of methods, but the only method that was both scalable and stable was k Means. Because of this, I decided to try k Means in conjunction with different dimension reduction techniques. To this end, I tested k Means on the data without any dimension reduction, the data with PCA, and the data with t-SNE (without PCA).   
+
+```{r clust, eval = FALSE, echo = FALSE, message=FALSE, warning=FALSE, cache= TRUE}
+ling_km_us3 <- kmeans(ling_noloc, centers=3)
+ling_km_us4 <- kmeans(ling_noloc, centers=4)
+
+ling_km_pca_s3 <- kmeans(as.data.frame(ling_pca_s$x), 
+                     centers=3)
+ling_km_pca_s4 <- kmeans(as.data.frame(ling_pca_s$x), 
+                     centers=4)
+
+tsne_np_us <- tsne_np %>% select(c(unscaled_v1, unscaled_v1.1))
+ling_tsne_km_us_np3 <- kmeans(tsne_np_us, 
+                         centers=3)
+ling_tsne_km_us_np4 <- kmeans(tsne_np_us, 
+                         centers=4)
+```
+
+```{r Figure 5, fig.cap = 'Clustering Results', echo = FALSE, message=FALSE, warning=FALSE, cache= TRUE, out.height = '75%', out.width = '75%'}
+knitr::include_graphics('images/clust_trial.png')
+```
+
+I initially chose four clusters based on my knowledge of US dialects. I believed that there would be a cluster for the south, the northeast, the midwest, and the west. After testing all the methods, it seemed that three clusters would be more appropriate. Figure 5 shows us that the raw data and PCA cannot produce 4 clusters reliably, however t-SNE can. 
+
+```{r Figure 6, fig.cap = 'Clustering Map for tSNE', echo = FALSE, message=FALSE, warning=FALSE, cache= TRUE}
+knitr::include_graphics('images/clust_trail_map.png')
+```
+
+To investigate how people group together, I plotted the clusters over a map of the US. We can see from Figure 6 that there is noticeable separation between the south, northeast, and midwest/west. There are some exceptions (e.g. southern Florida), but the separation holds true for the vast majority of cases. The gradient between these region lies where one might expect: Ohio, Indiana, Illinois, Missouri, etc. 
+
+```{r clust-plots, eval = FALSE, echo = FALSE, message=FALSE, warning=FALSE, cache= TRUE}
+smp <- sample(1:35000, size=7000, replace = F)
+km3 <- plot_km(data=as.data.frame(ling_pca_s$x), x='PC1', y='PC2', 
+        km=ling_km_us3, smp = smp,
+        title='')
+km4 <- plot_km(data=as.data.frame(ling_pca_s$x), x='PC1', y='PC2', 
+        km=ling_km_us4, smp = smp,
+        title='')
+
+km_pca3 <- plot_km(data=as.data.frame(ling_pca_s$x), x='PC1', y='PC2', 
+        km=ling_km_pca_s3, smp = smp,
+        title='')
+km_pca4 <- plot_km(data=as.data.frame(ling_pca_s$x), x='PC1', y='PC2', 
+        km=ling_km_pca_s4, smp = smp,
+        title='')
+
+km_tsne3 <- plot_km(data=tsne_np, x='unscaled_v1', y='unscaled_v1.1', 
+        km=ling_tsne_km_us_np3, smp = smp,
+        title='')
+km_tsne4 <- plot_km(data=tsne_np, x='unscaled_v1', y='unscaled_v1.1', 
+        km=ling_tsne_km_us_np4, smp = smp,
+        title='')
+
+km_pg3 <- plot_grid(km3, km_pca3, km_tsne3, ncol = 3,
+           labels = c('No dim. red.', 'PCA', 'tSNE'))
+km_pg4 <- plot_grid(km4, km_pca4, km_tsne4, ncol = 3)
+
+km_pg <- plot_grid(km_pg3, km_pg4, nrow = 2)
+```
+
+```{r eval = FALSE, echo = FALSE, message=FALSE, warning=FALSE, cache= TRUE}
+km_tsne_geo3 <- tsne_loc %>%
+  filter(long > -125) %>% ggplot() +
+    geom_polygon(data=states, aes(x=long,y=lat, group=group), 
+                 fill='white', color='black') +
+    geom_point(aes(x=long, y=lat, 
+                   color=as.factor(ling_tsne_km_us_np3$cluster[which(
+                     tsne_loc$long>-125)])),
+               shape='x', alpha=0.5) +
+    theme_minimal() +
+    theme(axis.title.x = element_blank(),
+          axis.ticks.x = element_blank(), axis.text.x = element_blank(),
+          axis.title.y = element_blank(), axis.ticks.y = element_blank(), 
+          axis.text.y = element_blank(),
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          legend.position = 'none')
+```
+
+I attempted to use other clustering methods, but many of them were not scalable. Some gave acceptable results on sub-smps while others did not. In particular, DBSCAN worked extremely poorly. From my preliminary analysis, it seems that density-based clustering methods worked poorly while centroid-based clustering was more promising. Density-based clustering may be useful with better fine-tuning of tSNE. 
+
+# Stability of findings to perturbation
+
+When I ran k Means with four clusters on the raw data, I initially got four starkly separated clusters. However, after running it multiple times, these result did not stand up. I decided to use this to investigate robustness in my results. 
+
+```{r eval = FALSE, echo = FALSE, message=FALSE, warning=FALSE, cache= TRUE }
+#Uses code from Lab 5 solutions
+ks <- c(3,4)
+n=6
+stab_checks <- lapply(ks, function(k){
+  lapply(1:n, function(trial){
+    return(kmeans(ling_noloc, centers=k)$cluster)
+  })
+})
+```
+
+```{r Figure 7, fig.cap = 'Cluster stability check', echo = FALSE, message=FALSE, warning=FALSE, cache= TRUE, out.height = '75%', out.width = '75%'}
+knitr::include_graphics('images/clust_stab.png')
+```
+
+```{r eval = FALSE, echo = FALSE, message=FALSE, warning=FALSE, cache= TRUE}
+plt_kmeans <- lapply(stab_checks, function(stab_check) {
+  lapply(stab_check, function(clust){
+    ggplot() +
+      geom_point(data=as.data.frame(ling_pca_s$x),
+                  aes(x = PC1, y = PC2, 
+                    color = as.factor(clust)),
+                  shape='o', alpha=0.5) +
+      labs(color = "Cluster") + 
+      theme(legend.position = 'none')
+  })
+})
+
+plt_kmeans_geo <- lapply(stab_checks, function(stab_check) {
+  lapply(stab_check, function(clust){
+    smp <- sample(1:length(ling_loc$long), 
+                  size = 7000, replace = F)
+    ling_loc_smp <- ling_loc[smp,]
+    clust_smp <- clust[smp]
+    ling_loc_smp %>% filter(long > -125) %>%
+    ggplot() +
+      geom_polygon(data=states,
+                    aes(x=long, y=lat, group=group),
+                    fill='white', color='black') +
+      geom_point(
+                  aes(x = long, y = lat, color = as.factor(
+                        clust_smp[which(ling_loc_smp$long > -125)])),
+                 shape='x', alpha=0.5) +
+      labs(color = 'Clusters') + 
+      theme(legend.position = 'none') +
+      theme_minimal() + 
+      theme(axis.title.x = element_blank(),
+            axis.ticks.x = element_blank(), axis.text.x = element_blank(),
+            axis.title.y = element_blank(), axis.ticks.y = element_blank(), 
+            axis.text.y = element_blank(),
+            panel.grid.major = element_blank(), 
+            panel.grid.minor = element_blank())
+  })
+})
+
+p1 <- plot_grid(plotlist = plt_kmeans[[1]], ncol = 3, labels = 1:n)
+p2 <- plot_grid(plotlist = plt_kmeans_geo[[1]], ncol = 3, labels = 1:n)
+
+p3 <- plot_grid(plotlist = plt_kmeans[[2]], ncol = 3, labels = 1:n)
+p4 <- plot_grid(plotlist = plt_kmeans_geo[[2]], ncol = 3, labels = 1:n)
+#p3 is the graph I included
+```
+
+Figure 7 shows the six trials of k Means with four centers with the raw data. We can see that the shape, size, and boundaries of the clusters are not stable over our trials. Some trials have clusters that are fairly distinct while others have clusters that are nearly indistinguishable. We can conclude that results with four clusters are not stable with the raw data.
+
+# Conclusion
+
+I do not think that this data or these results are useful for future analysis or decision-making. The results are fairly predictable; most Americans could likely reach similar conclusions without any data. Additionally, dialectologists have likely known about these results for decades. It is useful to be able to point to an 'objective' source of information, especially in the social sciences, but this is likely outweighed by the lack of detail in the results.
+
+A good reality check could be to simply ask Americans what they think are some broad categories of accents in the US. This check is problematic, but I believe it would be accurate for a small number of groups like we see in our clusters. Otherwise we could talk to a linguist about our results. In particular, they may be able to check the geographical boundaries between clusters.
+
+Given more time, I would have investigated t-SNE more. It seemed promising in being able to give more clusters than PCA, but running the algorithm took a significantly longer time. If I had more time and more computational resources, I would tune the hyperparameters and try to see if I could find even more clusters.
+
+# Academic Integrity Statement
+
+This work is entirely my own. Academic honesty is crucial to the process of learning and growing, and it is important that all students take their role in the process seriously. 

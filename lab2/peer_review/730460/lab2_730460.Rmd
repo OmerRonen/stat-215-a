@@ -1,0 +1,326 @@
+---
+title: "Lab 2 - Linguistics Data, Stat 215A, Fall 2020"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+header-includes:
+   - \usepackage{float}
+output: 
+  pdf_document:
+    number_sections: true
+---
+
+# Introduction
+
+DIALECTOLOGY is the study of dialects and the measurement of dialect differences, i.e. linguistic differences whose distribution is determined primarily by geography. We want to learn the geographical characteristics of dialectology and make clustering to find some interesting regularities in dialects in US. We will focus on the questions that look at lexical differences as opposed to phonetic differences. First I did EDA to have a general impression of data and some potential geographical patterns. Then I used PCA to reduce dimensions and utilized K-means and NMF to cluster the data. This report concluded that the clusters of answers are related to geography and the segmentation of Census Regions defined by U.S. Bureau of Census.
+
+# The Data
+
+This report uses linguistic data from a Dialect Survey conducted by Bert VauX [(link)](https: //www.dialectsofenglish.com). The questions and answers are found in the question_data.Rdata (this information was found and processed from dialect.redlog.net [(link)]http://dialect.redlog.net/index.html. 
+
+We use two datasets: lingData and lingLocation data. lingData contains the answers to the questions for 47,471 respondents acroos the United States.The dataset contains ID of repondents, CITY, ZIP CODE, STATE, lat (latitude), long (longitude) as well as their answers for Q50 - Q121. CITY and STATE were self-reported by respondents. lat and long are the center of Zip Code, based on the reported city and state. question_data.RData contains information of questions.
+```{r echo = FALSE, warning = FALSE}
+# set default knitr chunks
+knitr::opts_chunk$set(
+  echo = FALSE,  # don't print the code chunk
+  warning = FALSE,  # don't print warnings
+  message = FALSE,  # don't print messages
+  fig.width = 6,  # set default width of figures
+  fig.height = 4,  # set default height of figures
+  fig.align = "center",  # always align figure in center
+  fig.pos = "H",  # always plot figure at the exact location of the code chunk
+  cache = FALSE)  # don't cache results
+
+```
+
+```{r LIBRARY}
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(ggplot2)
+library(GGally)
+library(irlba)
+library(gridExtra)
+library(NMF)
+library(knitr)
+```
+
+
+```{r DataLoading}
+lingData = read.table("./data/lingData.txt", header = TRUE)
+lingLocation = read.table("./data/lingLocation.txt", header = TRUE)
+load('./data/question_data.RData')
+```
+
+
+## Data Cleaning
+
+I deleted 1020 missing data in latitude and longitude, and 3 missing data in state. The datapoints from AK and HI were also removed because of the scale limit of map. I also removed rows with wrong STATE abbreviations as well as the repondents who didn't answer any of 67 questions that we are interested in.
+```{r eval = FALSE}
+map_dbl(lingData, ~sum(is.na(.)))
+```
+```{r}
+lingData <- lingData %>% drop_na()
+data(state)
+lingData <- lingData %>% filter(STATE %in% state.abb)
+lingData = lingData %>% filter(STATE != "AK", STATE != "HI")
+lingData <- lingData[rowSums(lingData[5:71])>0, ]
+```
+
+
+## Exploratory Data Analysis
+This section shows how the respondents and their answers are distributed across the country. It will helps us have a preliminary impression about the geographical charateristics behind the linguistic data. First I drew scatter plot of respondents on the map, colored by the state of the responents. We can see that most respondents are from the west coast and the east part of the country.
+```{r fig.cap = "Location of Respondents", dev='png'}
+library(ggmap)
+
+qmplot(long, lat, data = lingData[,c("ID","long","lat","STATE")], maptype = "toner-background", color = STATE, xlim = c(-125, -67), ylim = c(25.75, 49), mapcolor = "bw", size = I(0.2), alpha = I(0.3))
+```
+
+My first question to explore is Question 065: "What do you call the insect that flies around in the summer and has a rear section that glows in the dark?" 
+
+29% of respondents use "lightning bug", 30% of them use "firefly", and 40% of them use those two terms interchangeably. The rest 1% used other words or had not word for this. To explore whether there is a geographical characteristic in the answers, I drew a scatter plot map of the first three answers using "ggmap" method. We can see that respondents in the west of US use "firefly" or use "firefly" and "lightning bug“ interchangebaly, and "firefly" dominates other choices in the westcoast. The pattern flips for the answers from the middle US to the east areas, where respondents use "lightning bug“ or use it with "firefly" interchangebaly. While "lightning bug" doesn't dominate other answers in the east coast as it does in the west coast, people living near Great Lakes Region, northeastern and southeastern borders are more likely to use them interchangeably rather than only use "lightning bug".
+
+```{r}
+knitr::kable(all.ans[[65]],caption = "What do you call the insect that flies around in the summer and has a rear section that glows in the dark?")
+```
+
+```{r DataQ065}
+lingDataQ065 = lingData[,c("ID","long","lat","Q065")]
+ansQ065 = all.ans[[65]]
+ansQ065$Q065 = sapply(as.character(ansQ065$ans.let), utf8ToInt) - 96
+lingDataQ065 = inner_join(lingDataQ065, ansQ065, on = "Q065")
+```
+
+```{r fig.cap = "Map of Answers for Q65", dev = "png"}
+qmplot(long, lat, data = lingDataQ065 %>% filter(Q065 %in% c(1,2,3)), maptype = "toner-background", color = ans, xlim = c(-125, -67), ylim = c(25.75, 49), mapcolor = "bw", size = I(0.5), alpha = I(0.3), legend = "bottom")
+```
+
+
+My second question to analyze is Q097. The question asks the preference to describe trash cans. 35.5% of respondents prefer "trash can", 27.4% of them prefer "garbage can". 0.41% of them prefer "rubbish bin" and 1.06% of them prefer "waste (paper) basket". The rest 33.26% of respondens think these words refer to different things. From the scatter plot, we can see that respondents in the west of US think those words are different. "trash can" become much more popular in South Atlantic areas and around the border of West North Central, West South Central (those terms are census divisions defined by U.S. Bureau of Census; see Figure 5).  And the answers from North Central, and East South Central mix up together, showing no significant clustering patterns. 
+
+
+```{r}
+knitr::kable(all.ans[[97]],caption = "Which of these terms do you prefer?")
+```
+
+```{r Data Q097}
+lingDataQ097 = lingData[,c("ID","long","lat","Q097")]
+ansQ097 = all.ans[[97]]
+ansQ097$Q097 = sapply(as.character(ansQ097$ans.let), utf8ToInt) - 96
+lingDataQ097 = inner_join(lingDataQ097, ansQ097, on = "Q097")
+```
+
+```{r fig.cap = "Map of answers for Q097", dev='png'}
+qmplot(long, lat, data = lingDataQ097 %>% filter(Q097 %in% c(1,2,5)), maptype = "toner-background", color = ans, xlim = c(-125, -67), ylim = c(25.75, 49), mapcolor = "bw", size = I(0.5), alpha = I(0.3), legend = "bottom")
+```
+
+# Dimension reduction methods
+
+## PCA
+To reduce the dimensions of the data, I converted the dataset into binary format. To reduce the computation workload and leave some data for stability check, I sampled 70% of data as "training set" and the rest as "testing set". Then I ran Principal Component Analysis on training set. I centered the data but did not scale it. I don't want to scale it because there is no significantly large difference in variance of columns because they are binary. Even if PCA will prefer variable with large variance, I think that is beneficial for us because it helps us to find more important and representative questions and answers to catch lexical difference in different regions. 
+
+Now let's read the plot of the cumulative proportion of variance explained by PCs. We can see that the first 91 PCs explain 75% of variance. 
+
+```{r USCensusDataLoading}
+#US Census Bureau Regions and Divisions by State
+us_region = read.csv("./others/us census bureau regions and divisions.csv")
+lingData = lingData %>% inner_join(us_region[,2:4],by=c("STATE"="State.Code"))
+```
+
+```{r BinaryData}
+library(fastDummies)
+selected_cols = paste0("Q",stringr::str_pad(quest.use$qnum, width = 3, pad=0))
+lingData_binary = dummy_cols(lingData, select_columns = selected_cols)
+lingData_binary = lingData_binary %>% select(-all_of(selected_cols))
+lingData_binary = lingData_binary %>% select(-contains("_0"))
+```
+
+```{r TrainTestSeparation}
+set.seed(1234)
+selected_IDs = sample(lingData_binary$ID,size = 0.7 * nrow(lingData_binary), replace = FALSE)
+lingData_binary_train = lingData_binary %>% filter(ID %in% selected_IDs)
+lingData_binary_test  = lingData_binary %>% filter(! ID %in% selected_IDs)
+prcomp_out = prcomp(x = lingData_binary_train[,9:476], center = TRUE, scale = FALSE)
+lingData_binary_train_scores = prcomp_out$x %>% as.data.frame()
+lingData_binary_train_scores = cbind(lingData_binary_train[,1:8], lingData_binary_train_scores)
+```
+
+```{r CumulativeVarPlot, fig.cap = "Cumulative Variance Explained by PCs",fig.width = 4.5, fig.height = 3, dev = 'png'}
+cum_var_ex = cumsum(prcomp_out$sdev^2 / sum(prcomp_out$sdev^2))
+cum_var_ex_df = data.frame("PCs" = 1:length(cum_var_ex), "cum_var" = cum_var_ex)
+ggplot(cum_var_ex_df,aes(x = PCs, y = cum_var)) + geom_point() + geom_abline(slope = 0, intercept = 0.75, color = "Red") + geom_vline(xintercept = which(cum_var_ex > 0.75)[1], linetype = "dotted")
+```
+```{r eval = FALSE}
+which(cum_var_ex > 0.75)[1]
+which(cum_var_ex > 0.5)[1]
+```
+
+Then, in order to check whether the PCs are showing some geographic charateristics, I utilized the census divisions and regions in the U.S. (provided by U.S. Bureau of the Census) as a reference The dataset is downloaded from this [github](https://github.com/cphalpert/census-regions). As shown in the map below, the country is composed of four regions: West, South, Midwest and Northeast. And each region comprises several census divisions.
+
+![Map of the United States, Showing Census Divisions and Regions]("./others/us_census_region.png")
+
+The matrix of 5x5 pair plots is showing relationship between the first 5 PCs. Each point is colored by the regions. We can see that the pair plot of PC1 and PC2 is showing a good clutering pattern of four regions. 
+```{r fig.cap = "Paired Plot of Top 5 PCs", dev = 'png'}
+npcs = 5
+var_ex = prcomp_out$sdev^2 / sum(prcomp_out$sdev^2)
+pca_region = ggpairs(data = lingData_binary_train_scores, 
+        mapping = aes(color = Region), 
+        columns = 8 + 1:npcs,  
+        columnLabels = paste("PC", 1:npcs, 
+                             " (", round(var_ex[1:npcs], 2), ")", sep = ""),
+        lower = list(continuous = wrap("points", alpha = .75, size = .5)),
+        diag = list(continuous = wrap("densityDiag", alpha = .5)),
+        upper = list(continuous = wrap("cor", size = 3)))
+pca_region
+```
+
+
+```{r fig.cap = "Scatter Plot of PC1 and PC2 (colored by Region)", fig.width = 5, fig.height = 3, dev = 'png'}
+ggplot(lingData_binary_train_scores) + aes(x = PC1, y=PC2, color = Region) + geom_point(alpha = 0.5)
+```
+
+Although PC1 and PC2 imply clustering about region, in each region there is no obvious clustering pattern for different divisions, neither in other pair plots. This can imply that the linguistic difference in adjacent divisions in the same regions are not as huge as that in adjacent regions.
+```{r fig.cap = "Scatter Plot of PC1 and PC2 (colored by Division)", fig.width = 5, fig.height = 3, dev = 'png'}
+ggplot(lingData_binary_train_scores) + aes(x = PC1, y=PC2, color = Division) + geom_point(alpha = 0.5)
+```
+
+
+```{r fig.cap = "Scatter Plot of PC1 and PC2 in each Region (colored by Division)", fig.width = 6, fig.height = 3, dev = 'png'}
+g1 = ggplot(lingData_binary_train_scores %>% filter(Region == "West")) + aes(x = PC1, y=PC2, color = Division) + geom_point(alpha = 0.5) + ggtitle("West")
+g2 = ggplot(lingData_binary_train_scores %>% filter(Region == "Midwest")) + aes(x = PC1, y=PC2, color = Division) + geom_point(alpha = 0.5) + ggtitle("Midwest")
+g3 = ggplot(lingData_binary_train_scores %>% filter(Region == "South")) + aes(x = PC1, y=PC2, color = Division) + geom_point(alpha = 0.5) + ggtitle("South")
+g4 = ggplot(lingData_binary_train_scores %>% filter(Region == "Northeast")) + aes(x = PC1, y=PC2, color = Division) + geom_point(alpha = 0.5) + ggtitle("Northeast")
+grid.arrange(g3, g1, g2, g4, ncol = 2) 
+```
+
+```{r eval = FALSE}
+npcs = 5
+ggpairs(data = lingData_binary_train_scores %>% filter(Region == "West"), 
+        mapping = aes(color = Division), 
+        columns = 8 + 1:npcs,  
+        columnLabels = paste("PC", 1:npcs, 
+                             " (", round(var_ex[1:npcs], 2), ")", sep = ""),
+        lower = list(continuous = wrap("points", alpha = .75, size = .5)),
+        diag = list(continuous = wrap("densityDiag", alpha = .5)),
+        upper = list(continuous = wrap("cor", size = 3)))
+ggpairs(data = lingData_binary_train_scores %>% filter(Region == "Midwest"), 
+        mapping = aes(color = Division), 
+        columns = 8 + 1:npcs,  
+        columnLabels = paste("PC", 1:npcs, 
+                             " (", round(var_ex[1:npcs], 2), ")", sep = ""),
+        lower = list(continuous = wrap("points", alpha = .75, size = .5)),
+        diag = list(continuous = wrap("densityDiag", alpha = .5)),
+        upper = list(continuous = wrap("cor", size = 3)))
+ggpairs(data = lingData_binary_train_scores %>% filter(Region == "South"), 
+        mapping = aes(color = Division), 
+        columns = 8 + 1:npcs,  
+        columnLabels = paste("PC", 1:npcs, 
+                             " (", round(var_ex[1:npcs], 2), ")", sep = ""),
+        lower = list(continuous = wrap("points", alpha = .75, size = .5)),
+        diag = list(continuous = wrap("densityDiag", alpha = .5)),
+        upper = list(continuous = wrap("cor", size = 3)))
+ggpairs(data = lingData_binary_train_scores %>% filter(Region == "Northeast"), 
+        mapping = aes(color = Division), 
+        columns = 8 + 1:npcs,  
+        columnLabels = paste("PC", 1:npcs, 
+                             " (", round(var_ex[1:npcs], 2), ")", sep = ""),
+        lower = list(continuous = wrap("points", alpha = .75, size = .5)),
+        diag = list(continuous = wrap("densityDiag", alpha = .5)),
+        upper = list(continuous = wrap("cor", size = 3)))
+```
+
+# Clustering
+Clustering on the whole binary dataset is not feasible because of the high dimension problem. Instead I clustered the data of with PCs. It is also a good chance for us to verify how well the PCs reflect geographical characteristics by comparing the result of the segmentation of census regions. I first used K-means method (with 4 centers) to cluster the dataset of the first 42 PCs, which explain 50% variance of data. Although the clusterings are not completely  separate, they work well and the scatter plot of clusters is very similar to those colored by the official census regions.
+
+```{r Kmeans, fig.cap = "K-means clustering on PC1 and PC2", fig.width = 8, fig.height = 3, dev ='png'}
+kmeans_lingData = kmeans(lingData_binary_train_scores[,9:50], centers = 4)
+plt1 <- ggplot(lingData_binary_train_scores) +
+  aes(x = PC1, y = PC2, color = as.factor(kmeans_lingData$cluster)) +
+  geom_point(alpha = 0.5) +
+  labs(title = "PCA K-means clustering (k = 4)",
+       color = "Clusters")
+plt2 <- ggplot(lingData_binary_train_scores) +
+  aes(x = PC1, y = PC2, color = as.factor(Region)) +
+  geom_point(alpha = 0.5) +
+  labs(title = "PC Plot",
+       color = "True Regions")
+grid.arrange(plt1, plt2, ncol = 2)
+```
+
+Then I clustered the data by NMF with 4 basis. When I plotted the NMF clusterings on axes of longtitude and latitude, despite there is still some overlapping in different groups, generally the clusterings are well separated from each other. It fits our previous observation from PCA analysis and K-means clustering that the answers to dialect questions show separated geographical patterns.
+```{r}
+nmf_out <- nmf(scale(lingData_binary_train[, 9:476], center = F, scale = T), rank = 4)
+
+W <- nmf_out@fit@W
+H <- nmf_out@fit@H
+
+par(mfrow = c(1,2))
+basismap(nmf_out, Rowv = NA, main = "W Matrix", 
+         annRow = list(Region = lingData_binary_train$Region))
+coefmap(nmf_out, main = "H Matrix", Colv = FALSE, 
+        annLegend = FALSE, legend = FALSE)
+
+nmf_cluster = apply(W,1,which.max)
+```
+
+```{r fig.cap = "NMF Heatmap on Binary Data Matrix", fig.width = 9, fig.height = 3, dev = 'png' }
+p1 <- ggplot(lingData_binary_train) +
+  aes(x = long, y = lat, color = as.factor(nmf_cluster)) +
+  geom_point(alpha = 0.5) +
+  labs(title = "NMF clustering (k = 4)",
+       color = "Clusters")
+p2 <- ggplot(lingData_binary_train) +
+  aes(x = long, y = lat, color = as.factor(Region)) +
+  geom_point(alpha = 0.5) +
+  labs(title = "True location plots",
+       color = "True Regions")
+grid.arrange(p1, p2, ncol = 2)
+```
+
+# Stability of findings to perturbation
+In previous sections, we have observed that answers to dialect questions show separated geographical patterns, which highly fits census region defined by U.S. Bureau of Census. This conclusion is based on PCA analysis, K-means and NMF methods for the 70% randomly sampled data. Now I want to see whether the conclusion still holds on the rest 30% data. As is shown below, 75% of variance are explained by the first 90 PCs. PC1 and PC2 for different census regions are separated well. And the clusterings from K-means also imply the separated patterns of census regions.
+
+```{r PCAforTestData}
+prcomp_out_test = prcomp(x = lingData_binary_test[,9:476], center = TRUE, scale = FALSE)
+lingData_binary_test_scores = prcomp_out_test$x %>% as.data.frame()
+lingData_binary_test_scores = cbind(lingData_binary_test[,1:8], lingData_binary_test_scores)
+```
+
+```{r CumVarTest, fig.cap = "Cumulative Variance Explained by PCs on test dataset", fig.width = 4.5, fig.height = 3, dev = "png"}
+cum_var_ex_test = cumsum(prcomp_out_test$sdev^2 / sum(prcomp_out_test$sdev^2))
+cum_var_ex_df_test = data.frame("PCs" = 1:length(cum_var_ex_test), "cum_var" = cum_var_ex_test)
+cum_test = ggplot(cum_var_ex_df_test,aes(x = PCs, y = cum_var)) + geom_point() + geom_abline(slope = 0, intercept = 0.75, color = "Red") + geom_vline(xintercept = which(cum_var_ex_test > 0.75)[1], linetype = "dotted")
+cum_test
+```
+
+```{r eval = FALSE}
+which(cum_var_ex_test > 0.75)[1]
+```
+
+```{r PcaKmeans, fig.cap = "PC Plot and K-Means clustering on test dataset", fig.width = 8, fig.height = 3, dev = "png"}
+kmeans_lingData_test = kmeans(lingData_binary_test_scores[,9:50], centers = 4)
+plt1_test <- ggplot(lingData_binary_test_scores) +
+  aes(x = PC1, y = PC2, color = as.factor(kmeans_lingData_test$cluster)) +
+  geom_point(alpha = 0.5) +
+  labs(title = "PCA K-means clustering (k = 4)",
+       color = "Clusters")
+plt2_test <- ggplot(lingData_binary_test_scores) +
+  aes(x = PC1, y = PC2, color = as.factor(Region)) +
+  geom_point(alpha = 0.5) +
+  labs(title = "PC Plot",
+       color = "True Regions")
+grid.arrange(plt1_test, plt2_test, ncol = 2)
+```
+
+
+# Conclusion
+Based on the previous analysis, we can see that the answers to the dialect questions are showing different geographical charateristics. After clustering, the separation of different groups considerably fits the region segmentation defined by U.S. Bureau of Census. However, those groups are not completely separated. There is some continum on the edge of different groups. And the answers in different divisions in the same region are hard to cluster That implies that the lexical difference in neighbouring divisions in the same regions are not as huge as that in different regions.
+
+I think the data and clustering in this project are useful for future decision makings, at least in the next couple of years, because language and dialects are changing slowly. But the data will be less valuable after several decades when words, culture and streams of information are highly likely to transform. And the clustering (related to geography) may be less reliable with the development urbanization and infomation technology, when people will be more and more connected with each other.
+
+# Academic Integrity Statement
+
+By my honor, I affirm that I have acted with honesty, integrity, and respect for others; I have not been helped by anyone, nor have I helped anyone with this project.
+
+# Bibliography
+[1] Nerbonne, J., & Kretzschmar, W. (2003). Introducing computational techniques in dialectometry. Computers and the Humanities, 37(3), 245-255.
+
+[2] Nerbonne, J., & Kretzschmar, . (2006). Progress in Dialectometry: Toward Explanation. In J. Nerbonne, & W. Kretzschmar, Jr. (Eds.), Progress in Dialectometry: Toward Explanation (pp. 387 - 398). Oxford-New York: Oxford University Press.
