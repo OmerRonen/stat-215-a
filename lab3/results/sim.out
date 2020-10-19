@@ -1,0 +1,26 @@
+here() starts at /accounts/campus/omer_ronen/stat-215-a/lab3
+Loading required package: iterators
+Loading required package: parallel
+INFO [2020-10-19 03:52:12] Starting 1th job
+INFO [2020-10-19 03:52:12] Starting 2th job
+INFO [2020-10-19 03:52:12] Starting 3th job
+INFO [2020-10-19 04:07:01] Finishing 1th job
+INFO [2020-10-19 04:07:01] Starting 4th job
+INFO [2020-10-19 04:24:20] Finishing 2th job
+INFO [2020-10-19 04:24:20] Starting 5th job
+INFO [2020-10-19 04:35:37] Finishing 3th job
+INFO [2020-10-19 04:35:37] Starting 6th job
+INFO [2020-10-19 05:12:00] Finishing 4th job
+INFO [2020-10-19 05:12:00] Starting 7th job
+INFO [2020-10-19 05:49:25] Finishing 5th job
+INFO [2020-10-19 05:49:25] Starting 8th job
+INFO [2020-10-19 06:12:57] Finishing 6th job
+INFO [2020-10-19 06:12:57] Starting 9th job
+INFO [2020-10-19 07:05:00] Finishing 7th job
+INFO [2020-10-19 07:05:00] Starting 10th job
+INFO [2020-10-19 07:54:34] Finishing 8th job
+INFO [2020-10-19 08:21:29] Finishing 9th job
+INFO [2020-10-19 09:10:50] Finishing 10th job
+INFO [2020-10-19 09:10:50] Got result
+INFO [2020-10-19 09:10:50] /accounts/campus/omer_ronen/stat-215-a/lab3/sim.csv  saved
+INFO [2020-10-19 09:10:50] Job Done!
