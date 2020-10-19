@@ -1,0 +1,42 @@
+---
+title: "lab3"
+author: "Omer Ronen"
+date: "10/19/2020"
+output: pdf_document
+---
+
+```{r echo = FALSE, warning = FALSE}
+# set default knitr chunks
+knitr::opts_chunk$set(
+  echo = FALSE,  # don't print the code chunk
+  warning = FALSE,  # don't print warnings
+  message = FALSE,  # don't print messages
+  fig.width = 6,  # set default width of figures
+  fig.height = 4,  # set default height of figures
+  fig.align = "center",  # always align figure in center
+  fig.pos = "H",  # always plot figure at the exact location of the code chunk
+  cache = FALSE)  # don't cache results
+
+```
+
+```{r LIBRARY}
+library(dplyr)
+library(ggplot2)
+library(here)
+source(here('R/utils.R'))
+
+```
+
+# 1 Parallelizing k-means
+1. 
+  (a). Code
+  (b). Code
+  (c). Obviously the cpp code is much faster
+```{r}
+time.df <- getTimesDf()
+time.df$LogTime <- log(time.df$Time)
+time.df %>% ggplot(aes(x=m, y=LogTime, color=Implementation)) +
+  geom_point() + theme_minimal()
+
+```
+  
