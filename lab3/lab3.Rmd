@@ -37,9 +37,9 @@ source(here('R/benhur.R'))
 
   (a). Code  
   
-  (b). Code  
+  (b). The important thing to note is that both the numerator and the denominator of the cosine (correlation) similarity are additive in the indices so we take advantage on this. In the $O(n^2)$ we simply iterate over all indices, compute each term separately and lastly divide. On the $O(k_1k_2n)$ implementation what iterate over each cluster combination and count all the indices for our two clusters vectors $l_1, l_2$ for which ${l_1=i\land l_2=j}$ for two cluster $i,j$. After counting we take the square to account for all pairs.  
   
-  (c). Obviously the cpp code is much faster  
+  (c). Obviously the cpp code is much faster, we can also see that the implementation in $O(k_1k_2n)$ is indeed faster with the margin becoming larger (in log scale) 
   
 ```{r fig.cap='Run time (log scale) for R and Cpp implementations of similarity (correlation) score' , message=FALSE, warning=FALSE}
 time.df <- getTimesDf()
@@ -62,4 +62,4 @@ time.df %>% ggplot(aes(x=m, y=LogTime, color=Implementation)) +
 plot.benhur()
 ```
 
-It is clear to see that 3 cluster is the most stable (excluding 1 of course which is shown as a sanity check).
+On this plot the cluster than stands out is k=3, with it's distribution very dense around higher values of similarity.For k=2 we have an interesting distribution where in 50% of cases we get really good similarity and on the other 50% we're as good as random.  k=1  serves as a sanity check. 

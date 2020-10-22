@@ -33,7 +33,8 @@ subSampleCluster <- function(X, s, k){
 getTimesDf <- function(){
   X <- getX()
   N <- nrow(X)
-  m.vec <- seq(0.1, 0.5, length.out = 5)
+  out.len=5
+  m.vec <- seq(0.1, 0.5, length.out = out.len)
   time.r <- c()
   time.cpp <- c()  
   time.cpp.slow <- c()
