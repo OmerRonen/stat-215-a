@@ -3,6 +3,9 @@ title: "lab3"
 author: "Omer Ronen"
 date: "10/19/2020"
 output: pdf_document
+header-includes:
+ \usepackage{float}
+ \floatplacement{figure}{H}
 ---
 
 ```{r echo = FALSE, warning = FALSE}
@@ -23,20 +26,40 @@ knitr::opts_chunk$set(
 library(dplyr)
 library(ggplot2)
 library(here)
+library(latex2exp)
 source(here('R/utils.R'))
+source(here('R/benhur.R'))
 
 ```
 
 # 1 Parallelizing k-means
-1. 
-  (a). Code
-  (b). Code
-  (c). Obviously the cpp code is much faster
-```{r}
+1.  
+
+  (a). Code  
+  
+  (b). Code  
+  
+  (c). Obviously the cpp code is much faster  
+  
+```{r fig.cap='Run time (log scale) for R and Cpp implementations of similarity (correlation) score' , message=FALSE, warning=FALSE}
 time.df <- getTimesDf()
 time.df$LogTime <- log(time.df$Time)
 time.df %>% ggplot(aes(x=m, y=LogTime, color=Implementation)) +
-  geom_point() + theme_minimal()
+  geom_point() + theme_minimal() +
+  scale_color_discrete(labels = 
+                         unname(TeX(c("$Cpp\\;O(k_1k_2n)",
+                                      "$Cpp\\;O(n^2)",
+                                      "R"))))
+
 
 ```
-  
+
+2. code  
+
+3. 
+
+```{r,fig.cap = 'Stability analysis for choice of K (number of clusters). In A we can see the similiraity histograms for various choices of k. In B we show the empirical CDF obtained from calculating the similarity over 100 sub-samples of the dataset'}
+plot.benhur()
+```
+
+It is clear to see that 3 cluster is the most stable (excluding 1 of course which is shown as a sanity check).

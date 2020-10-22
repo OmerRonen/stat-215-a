@@ -1,55 +1,91 @@
 #include <Rcpp.h>
 using namespace Rcpp;
 
-// [[Rcpp::export]]
-Rcpp::NumericVector similarityRcpp(Rcpp::NumericVector x, Rcpp::NumericVector y) {
-  // Calculate the euclidian distance between <x> and <y>.
-  
-  // C++ requires initialization of variables.
-  double result = 0.0;
-  
 
+// [[Rcpp::export]]
+Rcpp::NumericVector similarityRcpp(Rcpp::NumericVector l, Rcpp::NumericVector y) {
+  // similarity implementation in O(k_1*k_2*n)
+  double result = 0.0;
+  // we clone becasue we later sort
+  NumericVector x;
+  x=clone(l);
   
-  
-  // This is the length of the x vector.
   int n = x.size();
+  // the range of clusters
+  int u_c = l.sort()[n-1];
+  int l_c = l.sort()[0];
   
+  double c_12 = 0.0;
+  double c_11 = 0.0;
+  double c_22 = 0.0;
+  // we iterate over clusters
+  // for each combination j,i we count the number
+  // indices for which x=j and y=i
+  // then we take the square of that number 
+  // so all pairs are counted
+  for (int i = l_c; i < u_c+1; i++) {
+    for (int j = l_c; j < u_c+1; j++) {
+
+      double n_xy = 0.0;
+      double n_yy = 0.0;
+      double n_xx = 0.0;
+
+      for (int k = 0; k < n; k++) {
+
+      double x_sim = x[k]==i;
+
+      double y_sim = y[k]==j;
+
+      double sim = x_sim * y_sim;
+
+      n_xy += sim;
+      // we don't want to count more than once
+      if (j==i){
+      n_yy += y_sim;
+      n_xx += x_sim;
+      }
+
+    }
+      c_12 += n_xy*n_xy;
+
+      c_11 += n_xx*n_xx;
+
+      c_22 += n_yy*n_yy;
+
+    }}
+
+  result = c_12/sqrt(c_22 * c_11);
+  return Rcpp::NumericVector::create(result);
+  }
+
+// [[Rcpp::export]]
+Rcpp::NumericVector similarityRcppSlow(Rcpp::NumericVector x, Rcpp::NumericVector y) {
+  // similarity implementation in O(n^2)
+  
+  double result = 0.0;
+  int n = x.size();
+  // diagonal part
   double c_12 = n;
   double c_11 = n;
   double c_22 = n;
-  
-  // Check that the size is the same and return NA if it is not.
-  if (y.size() != n) {
-    Rcpp::Rcout << "Error: the size of x and y must be the same.\n";
-    return(Rcpp::NumericVector::create(NA_REAL));
-  }
-  
-  
+
+  // going over the two vectors and counting 
+  // same clusters
   for (int i = 0; i < n; i++) {
     for (int j = 0; j < i; j++) {
-      // Rcout << "The value of x i : " << x[i] << "\n";
-      // Rcout << "The value of x j : " << x[j] << "\n";
-      // Rcout << "The value of y i : " << y[i] << "\n";
-      // Rcout << "The value of y j : " << y[j] << "\n";
+
     double x_sim = x[i]==x[j];
-    // Rcout << "The value of x_sim : " << x_sim << "\n";
     double y_sim = y[j]==y[i];
-    // Rcout << "The value of y_sim : " << y_sim << "\n";
     double sim = x_sim * y_sim;
-    // Rcout << "The value of sim : " << sim << "\n";
-    
+    // c matrix is symmetric
     c_11 += x_sim*2;
     c_22 += y_sim*2;
-    
+
     c_12 += sim*2;
 
     }}
-  // Rcout << "The value of c_11 : " << c_11 << "\n";
-  // 
-  // Rcout << "The value of c_22 : " << c_22 << "\n";
-  // Rcout << "The value of c_12 : " << c_12 << "\n";
-  
   result = c_12/sqrt(c_22 * c_11);
-  // We need to convert between the double type and the R numeric vector type.
   return Rcpp::NumericVector::create(result);
 }
+
+

@@ -1,5 +1,4 @@
 library(here)
-library('Rcpp')
 library(foreach)
 library(doParallel)
 library(parallel)
@@ -7,9 +6,8 @@ library(logger)
 
 source(here('R/utils.R'))
 
-
-
 .innerLoopStep<- function(X, m, k){
+  # performs the inner loop step and returns a similarity score
   N=nrow(X)
   sample.size <-  round(N*m)
   sample_1 <- sort(sample(c(1:N), sample.size))
@@ -29,6 +27,10 @@ source(here('R/utils.R'))
 }
 
 .innerLoop <- function(X, n, m, k){
+  # wrapper around the .innerLoopStep function
+  # returns a vector of size n of similarity scores
+  # for a given data(X), subsample parameter(m) and 
+  # numebr of cluster (k)
   similarities <- c()
   for (i in c(1:n)){
     similarities <- c(similarities, .innerLoopStep(X, m, k))
@@ -36,19 +38,20 @@ source(here('R/utils.R'))
   return(similarities)
 }
 
-
-
 main <- function(){
-  args <- commandArgs(trailingOnly = TRUE)
-  outfile <- args[1]
-  m <- as.numeric(args[2])
-  N <- as.numeric(args[3])
-  X <- getX()
+  # main function of this module
   
+  # we have a cli for this module 
+  args <- commandArgs(trailingOnly = TRUE)
+  outfile <- args[1] # name of output file
+  m <- as.numeric(args[2])   # sub sample ratio
+  N <- as.numeric(args[3]) # number of iterations for each cluster
+  X <- getX() 
+  # config
   nCores <- 3
   nSub <- 10
   registerDoParallel(nCores) 
-# ptm <- proc.time()  # start timer
+  # sending the jobs, different job for each cluster
   result <- foreach(i = 1:nSub) %dopar% {
     start.msg <- paste('Starting ', i, 'th job', sep = '')
     log_info(start.msg)
@@ -57,9 +60,9 @@ main <- function(){
     log_info(end.msg)
     output # this will become part of the out object
   }
-  # proc.time() - ptm  # compute time elapsed
   log_info('Got result')
-  result <- data.frame(matrix(unlist(result), ncol = length(result)))
+  result <- data.frame(matrix(unlist(result),
+                              ncol = length(result)))
   write.csv(x=result, file=here(outfile))
   save.msg <- paste(here(outfile), ' saved')
   log_info(save.msg)
