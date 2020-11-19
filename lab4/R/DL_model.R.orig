@@ -1,0 +1,99 @@
+library(keras)
+library(tensorflow)
+library(tidyverse)
+library(here)
+library(dplyr)
+source(here('R/utils.R'))
+source(here('R/eda.R'))
+source(here('R/analyze_metrics.R'))
+.plotHist <- function(history){
+  df.hist <- as.data.frame(history)
+  loss.data <- df.hist[df.hist$metric=='loss',]
+  loss.data.train <- loss.data[loss.data$data=='training', ]
+  loss.data.train$value <- round(loss.data.train$value,3)
+  plt <-loss.data.train %>%ggplot(aes(epoch, value)) +
+    geom_line(aes(colour='red')) + xlab('Epoch') + ylab('Training loss') +
+    theme_minimal()+theme(legend.position = "none")
+  ggsave(here('figures/dl_conv.png'),
+         plt, width = 3, height = 3)
+}
+options(keras.view_metrics = FALSE)
+.getKerasXMat <- function(data){
+  # returns the X matrix for DL model
+  k.x.mat <- data %>% 
+    select(-c('x', 'y','truth', 'img_name'))
+  k.x.mat <- as.matrix(k.x.mat)
+  return(k.x.mat)
+}
+.getKerasYvec <- function(data){
+  # returns the labels for DL model 
+  has.label <- data$truth=='cloud'
+  y.vec <- to_categorical(ifelse(has.label, 1, 0))
+  return(y.vec)
+}
+# Network design
+.trainModel <- function(X_train,Y_train){
+  # traines and save a dl cloud predictor
+  # X_train: dataframe with all the 8 features
+  # Y_train: lables, two columns, 
+  # first column is no cloud, second is cloud
+  model <- keras_model_sequential()
+  model %>%
+    # Input layer
+    layer_dense(units = 20, activation = 'relu', input_shape =  ncol(X_train)) %>% 
+    # layer_dense(units = 2, activation = 'softmax')
+    # Hidden layer
+    layer_dense(units = 30, activation = 'relu') %>%
+    layer_dense(units = 30, activation = 'relu') %>%
+    layer_dense(units = 30, activation = 'relu') %>%
+    # Output layer
+    layer_dense(units = 2, activation = 'softmax')
+  # Network config
+  model %>% compile(
+    loss = 'binary_crossentropy',
+    optimizer = 'adam',
+    metrics = c('accuracy')
+  )
+  # Running our data
+  history <- model %>% fit(
+    X_train, Y_train, 
+    epochs = 20, 
+    batch_size = 240,
+    validation_split = 0.2,
+  )
+  .plotHist(history)
+  return(model)}
+predictCloudProb <- function(data){
+  # trains and returns the cloud probabilities
+  # data <- loadData() # loading the data
+<<<<<<< HEAD
+=======
+  img_files <- list.files(path = 'data', pattern = '.txt')
+  data <- loadData('data', img_files)
+>>>>>>> c83c95e... changes
+  labels <- data$truth!='unlabeled'
+  data.label <- data[labels, ]
+  # processing the data
+  tst.img <- data.label$img_name =='image2.txt'
+  tst.img.full <- data$img_name == 'image2.txt'
+  data.train <- data.label[!tst.img,]
+  data.test <- data[tst.img.full,]
+  X.train <- .getKerasXMat(data.train)
+  X.test <- .getKerasXMat(data.test)
+  Y.train <- .getKerasYvec(data.train)
+  # training the model
+  model <- .trainModel(X.train, Y.train)
+  # predictions
+  predictions <- model %>% predict_proba(X.test)
+  #cloud label
+  return(predictions[,2])
+}
+<<<<<<< HEAD
+
+
+
+
+=======
+>>>>>>> c83c95e... changes
+
+
