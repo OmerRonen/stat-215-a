@@ -40,14 +40,15 @@ knitr::opts_chunk$set(
   fig.width = 7,  # set default width of figures
   fig.height = 4,  # set default height of figures
   fig.align = "center",  # always align figure in center
-  # fig.pos = "H",  # always plot figure at the exact location of the code chunk
+  fig.pos = "H",  # always plot figure at the exact location of the code chunk
   dpi = 300,
   cache = TRUE)  # cache results
+
 source('R/utils.R')
 source('R/split_data.R')
 source('R/analyze_metrics.R')
 source('R/train_rf.R')
-source('R/DL_Model.R')
+source('R/DL_Model_2.R')
 source('R/eda.R')
 source('R/train_logit.R')
 
@@ -62,7 +63,7 @@ imgs <- loadData('data', img_files)
 ```
 
 # Data Description
-The data used in this report is three images collected from MISR. Each pixel in the images is labeled with its `x` and `y` coordinates, categorical cloud indicator (no cloud = -1, unlabeled = 0, and cloud = 1), three engineered features (`NDAI`, `SD` and `CORR`), and radiance features(`DF`, `CF`, `BF`, `AF` and `AN`). The radiance features are essentially the radiance received by satellite cameras at different zenith angles: 70.5°(`DF`), 60.0°(`CF`), 45.6°(`BF`), 26.1°(`AF`) in the forward direction; 0.0°(`AN`) in the nadir direction. `NDAI` stands for Normalized Difference Angular Index, which is the normalized difference of the means of `DF` and `AN`. `SD` is the standard deviation of MISR nadir camera pixel values across a scene. `CORR` is the correlation of MISR images of the same scene from different MISR viewing directions. The categorical cloud indicator is hand-labeled by domain experts and will serve as the ground truth in our analysis. Since unlabeled pixels provide no information to help us evaluate our models, we exclude them and make our data with only binary classes (no cloud = -1, cloud = 1).
+The data used in this report is three images collected from MISR. Each pixel in the images is labeled with its `x` and `y` coordinates, categorical cloud indicator (no cloud = -1, unlabeled = 0, and cloud = 1), three engineered features (`NDAI`, `SD` and `CORR`), and radiance features (`DF`, `CF`, `BF`, `AF` and `AN`). The radiance features are essentially the radiance received by satellite cameras at different zenith angles: 70.5°(`DF`), 60.0°(`CF`), 45.6°(`BF`), 26.1°(`AF`) in the forward direction; 0.0°(`AN`) in the nadir direction. `NDAI` stands for Normalized Difference Angular Index, which is the normalized difference of the means of `DF` and `AN`. `SD` is the standard deviation of MISR nadir camera pixel values across a scene. `CORR` is the correlation of MISR images of the same scene from different MISR viewing directions. The categorical cloud indicator is hand-labeled by domain experts and will serve as the ground truth in our analysis. Since unlabeled pixels provide no information to help us evaluate our models, we exclude them and make our data with only binary classes (no cloud = -1, cloud = 1).
 
 
 # EDA
@@ -203,10 +204,11 @@ Since the pixels are spatially correlated with each other, we use the entire ima
 ```{r}
 # =========================================
 # to split the data again run 
-# train_data <- splitData(imgs)
+train_data <- splitData(imgs)
+
 # =========================================
 # load train & test split data to ensure having the same fold assignments
-train_data <- read.csv('data/train_test_split_1.csv')
+# train_data <- read.csv('data/train_test_split_1.csv')
 ```
 
 Even though PCA analysis gives us how features contribute to the top principle components of the data, the result is inconsistent with different subsamples. Hence, we decide to use random forest model to find the top important features and have stronger support evidence for the top important features. Random forest model does not involve any assumption besides the sample data is representative. To ensure the assumption, we subsample 80% of training data and run Random Forest model for 5 times to obtain feature importance and top 3 most important features by ranking are `NDAI`, `SD` and `AN`. This result is consistent with our analysis on feature correlation earlier. The feature importance from Random Forest model is calculated by the average decrease in Gini index over all decision trees and Gini index is the measurement of node impurity from splitting on the variable. 
@@ -278,13 +280,12 @@ train_data_image2_rev$truth <- factor(
 logit_model <- trainLogitmodel(train_data_image2_rev, train_features)
 # ========================================
 
-# load model
-# logit_model <- readRDS("rev2_logit_model_image2_3vars.rds")
+# make prediction
 logit_pred <- predict(logit_model, test_data_image2, type = 'prob')
 
 ```
 
-```{r logit assumption test-1, fig.cap='Assumption test of Logistic regression: relationships between predictors and log-odds'}
+```{r logit assumption test-1, fig.cap='Assumption test of Logistic regression: relationships between predictors and log-odds', fig.height=3.75}
 # assumption 1 test:
 # features vs log-odds linear relationship
 pred_covaraites_df <- data.frame(logit_pred$cloud, 
@@ -317,7 +318,7 @@ p3 <- qplot(an, log_odds
 ggarrange(p1, p2, p3, nrow = 1)
 ```
 
-Next, for assumption two, we would like to investigate whether correlated predictors can inflate variance and bias of the coefficients. To test this assumption, we add in the radiance features, in addition to the three engineered features, to train a logistic model. Since we know the radiance is highly correlated with each other, as demonstrated in the EDA section, the predictors in the model are correlated. We compare the variance of this model with our original logistic model trained with only three features in Table 1, and find the variances of the coefficients of `NDAI`, `SD` and `AN` indeed inflate after adding the correlated predictors to our model. Hence, assumption two is also fulfilled in our logistic model.
+Next, for assumption two, we would like to investigate whether correlated predictors can inflate variance and bias of the coefficients. To test this assumption, we add in the radiance features, in addition to the three features, to train a logistic model. Since we know the radiance is highly correlated with each other, as demonstrated in the EDA section, the predictors in the model are correlated. We compare the variance of this model with our original logistic model trained with only three features in Table 1, and find the variances of the coefficients of `NDAI`, `SD` and `AN` indeed inflate after adding the correlated predictors to our model. Hence, assumption two is also fulfilled in our logistic model.
 
 ```{r logit assumption test-2, cache = TRUE}
 # assumption 2 test:
@@ -342,20 +343,20 @@ A decision tree is a building block of Random forest model. In a decision tree, 
 2. The predictions made by the individual trees have low correlations with each other. 
 
 The first assumption is safe to make since even when snow- or ice-covered surfaces look similar to cloud on image, snow, ice and cloud are different materials and hence would reflect different levels of light radiance. To ensure the second assumption, Random Forest uses both bootstrap aggregation method which allows each decision trees to randomly sample from the dataset with replacement and feature randomness which allows individual trees choosing features to split from a random subset of features. 
+
+In the project, we use cross validation when training the model. After training Random Forest model with all features, we observe that the feature importance drops significantly after the first 3 features and the performance of the model is actually better based on ROC metric when trained with only the most important features: `NDAI`, `SD`, `AN`. Hence, we use only the top 3 most important features for Random Forest model. 
 ```{r rf_model}
 # ====================================
 # to train the RF, we can run this code
 rf_model <- trainRFmodel(train_data_image2, train_features)
 # =====================================
 
-# load model
-# rf_model <- readRDS("model_image2_3vars.rds")
-
+# make predictions
 rf_pred <- predict(rf_model, test_data_image2, type = 'prob')
 ```
 
 ## Neural Network
-We used a feed forward Neural Network as a classifier to predict the cloud/no cloud label. The architecture includes three hidden layers with 30 neurons and softmax output. The model was trained using the features: `NDAI`, `SD`, `CORR`, `DF`, `CF`, `BF`, `AF`, `AN`. We trained for 20 epoches with batch size 240 using Adam optimizer (default learning rate) and binary cross entropy loss. The chosen architecture defines a family of parametric distributions of the label given the features.. We assume that after the training process is complete the distribution we get is a good approximation of the distribution of the data.
+We used a feed forward Neural Network as a classifier to predict the cloud/no cloud label. The architecture includes three hidden layers with 30 neurons and softmax output. The model was trained using the features: `NDAI`, `SD`, `CORR`, `DF`, `CF`, `BF`, `AF`, `AN`. We trained for 20 epoches with batch size 240 using Adam optimizer (default learning rate) and binary cross entropy loss. The chosen architecture defines a family of parametric distributions of the label given the features. We assume that after the training process is completed, the distribution we get is a good approximation of the distribution of the data.
 
 It is rather hard to validate this assumption, looking at how the predictions compared with other methods we can probably say that the assumption does not hold but provides a reasonable approximation.   
 
@@ -370,8 +371,7 @@ colnames(nn_pred_df) <- c('x','y','truth','nn_pred')
 ```
 
 # Model Evaluation
-```{r evaluation metrices, fig.cap='ROC curve and PR curve of Logistic Regression, Random Forest, Deep Learning models' }
-#fig.height=4, fig.width=8
+```{r evaluation metrices, fig.cap='ROC curve and PR curve of Logistic Regression, Random Forest, Deep Learning models' ,fig.height=3.75, fig.width=8}
 # combine prediction probability
 # of the three classifiers
 combine_pred <- data.frame(truth = test_data_image2$truth, 
@@ -395,29 +395,27 @@ ggarrange(roc_pr$roc_plot, roc_pr$pr_plot, common.legend = TRUE)
 
 ```
 
-```{r spider plot, fig.cap='Radar plot to compare all three models performance'}
-#fig.height=4.5
+```{r spider plot, fig.cap='Radar plot to compare all three models performance',fig.height=4.5}
 metrics_df <- calculateMetrics(thres = 0.5,
                                combine_pred_long,
                                roc_pr$roc_pr_df)
-# write.csv(metrics_df, 'data/metrics_df.csv')
 # plot metrics
 plot.spider(combine_pred_long)
 
 ```
 
-After evaluating and comparing the performance of Logistic Regression, Random Forest, and Deep Learning Neural Network model, we decide to choose Deep Learning Neural Network model as the final model. The reason for the decision is based on the metrics ROC AUC and PR AUC. Even though Logistic Regression model has the highest corners in both ROC and PR curves plots (Figure 6), the areas under the ROC and PR curves of Deep Learning model are the largest. Since we train our model on a very limited dataset, we want to ensure the generality of the models so the model would also perform well on future data. The area under the curve is a more general metric to evaluate a classification model since it is calculated over different probability threshold unlike the other metrics where we use 50% as the threshold. Therefore, although Logistic Regression also has the highest values for Recall, F value and Balance Accuracy (Figure 7), we still favor ROC AUC and PR AUC metrics and choose Deep Learning model. Random Forest performance is the combination of both Deep Learning and Logistic Regression models that has second highest values in all metrics. With the same reason to ensure the generality of the model, we would still prefer Deep Learning model over Random Forest. 
+After evaluating and comparing the performance of Logistic Regression, Random Forest, and Deep Learning Neural Network model, we decide to choose Deep Learning Neural Network model as the final model. When comparing the models in ROC and PR curve plots (Figure 6), we can see that overall Deep Learning model performs better than Logistic Regression and Random Forest model. Similarly, when comparing between models in other metrics (Figure 7), we see that Deep Learning model has highest values in ROC AUC and PR AUC. Random Forest and Logistic Regression alternatively perform better than the other in different metrics. We choose Deep Learning model as our final model because we favor the model that has highest ROC AUC and PR AUC. Since those two metrics can ensure the generality of the model since they take into account a range of probability thresholds unlike other metrics where we set the probability threshold at 50% and calculate the value. Since the given data for this project is very limited, ensuring the generality of the model so that it will work well on new data is our top choice.
 
 # Post-hoc EDA of Deep Learning Neural Network Model
 
 ## Training analysis  
-The first thing to inspect is the convergence of gradient decent in training to assume we have reached a local minima  
+The first thing to inspect is the convergence of gradient decent in training to assume we have reached a local minima.  
 
-```{r  out.width = "30%", fig.cap='Training loss value along training epochs'}
+```{r  out.width = "40%", fig.cap='Training loss value along training epochs'}
 include_graphics('other/dl_conv.png') 
 ```
 
-```{r prediction image, fig.cap = '1. Heatmap of Deep Learning model probability prediction for cloud; 2. Deep Learning prediction on all pixels; 3. Deep Learning prediction on labeled pixels; 4. Original image' }
+```{r prediction image, fig.cap = '1. Heatmap of Deep Learning model probability prediction for cloud; 2. Deep Learning prediction on all pixels; 3. Deep Learning prediction on labeled pixels; 4. Original image'}
 # combine prediction and truth values
 # get unlabeled pixels
 
@@ -439,7 +437,9 @@ truth_pred_df <- cbind(combine_pred %>% select(nn_pred, truth),
 truth_pred_df <- rbind(truth_pred_df, 
                        nn_pred_df %>%
                          mutate(model_type = 'DL on All',
-                                prediction = ifelse(nn_pred >= 0.5, 
+                                # optimal threshold for nn model is at 0.4
+                                # from ROC curve
+                                prediction = ifelse(nn_pred >= 0.4, 
                                                     'cloud', 'no_cloud')) %>%
                          select(x,y, model_type, prediction))
 truth_pred_df$model_type <- factor(truth_pred_df$model_type,
@@ -478,7 +478,6 @@ plot_grid(first_row,
           nrow = 2, rel_heights = c(0.12,1))
 ```
 
-Figure 8 and Figure 9 show that Deep Learning model depends heavily on `NDAI` features and it often predicts unlabeled pixels as cloud following the heatmap of ndai closely.  
 
 ```{r post-hoc eda: features heatmap, fig.cap='The heatmaps of the three important features on the testing image', cache = TRUE}
 # plot features heatmap for:
@@ -498,7 +497,8 @@ ggarrange(ndai_heatmap_plt,
           legend = NULL, nrow = 1)
 
 ```
-Now excluding the unlabeled pixels, we look deeper into the feature distributions of the misclassified pixels. We further divided the misclassified pixels into type I and type II error groups, and compare them with the feature distribution of the whole testing set to see if we can observe any patterns. From Figure 10, we found the distributions of `NDAI` didn't differ much between groups, and that the classifier tended to misclassify the no-cloud pixel as cloud when `AN` is higher and `SD` is lower (the opposite for misclassifying the cloud ones as no-cloud).
+
+Examining the prediction of Deep Learning model on labeled pixels with the ground truth image, we see that the majority of the pixels are predicted correctly except for those at edges of regions, a cluster of pixels in the middle of image 2 and a cluster of pixels at the left and right bottom corners being missclassified as no cloud instead of cloud (Figure 9). We look deeper into the feature distributions of the misclassified pixels to identify ranges of features that help explain the missclassification pattern. From Figure 10, we can see that the predicted cloud probability depends heavily on `NDAI` features. The heatmap of `NDAI` helps us explain a lot about the missclassification pattern in our prediction, especially those at the edges of the regions and in the middle of the image. For the missclassified pixels at the left and right bottom corners, those can be explained by looking at left and right bottom corner of `AN` and `SD` heatmaps, we can see the two opposite values where the color is darker in `AN` heatmap and lighter in `SD` heatmap. We further analyze the missclassification pattern quantitatively by dividing the misclassified pixels into type I and type II error groups, and comparing them with the feature distribution of the whole testing set to see if we can observe similar patterns with the heatmap. From Figure 11, we find that the mean of `NDAI` feature between type I and type II error differ from each other noticeably. For `AN` and `SD` features, even though the difference in means between groups are not significant, within the same type of error, the means of `AN` and `SD` features are often in the opposite direction compared to the whole testing set's mean.
 
 ```{r post-hoc eda: error pattern, fig.cap='Feature distributions of the testing set, type I error group and type II error group', cache = TRUE}
 # pattern analysis for misclassified pixels
@@ -518,7 +518,9 @@ features_df <- imgs %>%
 # Type I error: false positive ; Type II error: false negative
 error_df <- merge(error_pred, features_df, by = c("x", "y"))
 error_long <- error_df %>%
-  pivot_longer(-c(x,y,nn_pred,truth), names_to = 'feature_type', values_to = 'values') %>%
+  pivot_longer(-c(x,y,nn_pred,truth), 
+               names_to = 'feature_type', 
+               values_to = 'values') %>%
   mutate(error_type = ifelse(nn_pred == 'cloud', 'type I error', 'type II error'))
 error_long <- error_long[, c('feature_type', 'values', 'error_type')]
 
@@ -531,12 +533,19 @@ compare_error_long <- rbind(error_long, features_long)
 
 # plot the data distribution of the
 # misclassified pixels
-ggplot(compare_error_long, aes(x = error_type, y = values, fill = feature_type)) +
+ggplot(compare_error_long, aes(x = error_type, y = values, 
+                               fill = feature_type)) +
   geom_boxplot() +
   facet_wrap(feature_type ~., scale = 'free') +
-  scale_fill_viridis(discrete = TRUE, guide = FALSE) +
+  scale_fill_viridis(discrete = TRUE, guide = FALSE,
+                     option = 'inferno', begin = 0.5, direction = -1) +
   xlab('') + ylab('') +
   theme_bw()
 ```
 
 # Conclusion
+For the future use of the Deep Learning model in classifying cloud and no cloud regions on MISR images, we would need a better understanding of the ultimate goal of the classification in building climate models. Cloud is not a uniformly dense object and there will be regions in a cloud that are less dense than other regions. The density of clouds is reflected by different gradients in the features' heatmaps. Therefore, if the end goal of the classification step is to reflect the true cloud coverage on the image, then our predictions (both probability prediction and hard prediction) reflect the reality of cloud coverage truly. However, if the end goal of the classification step is to identify block of cloud and no cloud pixels like the expert labels, we can using a smoothing algorithm to provide a smoother areas of cloud and no cloud on the image. In conclusion, given the amount of data, the Deep Learning model has performed very well and with the priority as model's generality when choosing the final model, we believe that our model will perform well on future data even without expert labels. 
+
+# Bibliography
+
+
