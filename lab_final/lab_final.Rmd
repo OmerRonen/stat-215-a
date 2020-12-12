@@ -1,0 +1,939 @@
+---
+title: "Final Lab"
+author: "Huong Vu, Aliyah Hsu, Omer Ronen"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+header-includes:
+   - \usepackage{float}
+geometry: "left=1.5cm,right=1.5cm,top=2cm,bottom=2cm"
+bibliography: other/reference.bib
+output:
+  pdf_document:
+    dev: png
+    number_sections: true
+    fig_caption: yes        
+    citation_package: natbib
+  bookdown::pdf_book:
+    citation_package: biblatex
+  bookdown::html_document2:
+    fig_caption: yes
+  bookdown::pdf_document2:
+    fig_caption: yes
+---
+
+```{r setup, echo = FALSE, message=FALSE, warning=FALSE}
+# load in useful packages
+library(tidyverse)
+library(ggpubr)
+library(viridis)  
+library(ggfortify)
+library(gridExtra)
+library(GGally)
+library(tidymodels)
+library(cowplot)
+library(knitr)
+library(here)
+library(fmsb)
+library(gridExtra)
+library(RColorBrewer)
+# set default knitr chunks
+knitr::opts_chunk$set(
+  echo = FALSE,  # don't print the code chunk
+  warning = FALSE,  # don't print warnings
+  message = FALSE,  # don't print messages
+  fig.width = 7,  # set default width of figures
+  fig.height = 4,  # set default height of figures
+  fig.align = "center",  # always align figure in center
+  fig.pos = "H",  # always plot figure at the exact location of the code chunk
+  dpi = 300,
+  cache = TRUE)  # cache results
+
+source('R/cleanData.R')
+source('R/modelEval.R')
+source('R/ShrdCntyExp.R')
+source('R/linearModel.R')
+source('R/timeseries.R')
+source('R/sanityCheck.R')
+source('R/clepTune.R')
+source('R/Clep.R')
+source('R/OneWeek.R')
+source('R/ClepViz.R')
+```
+ 
+```{r}
+# specify county names
+bay_counties <- c('Alameda', 'Contra Costa', 'Marin ', 'Napa', 'San Francisco', 
+                  'San Mateo', 'Santa Clara', 'Solano', 'Sonoma')
+south_counties <- c('Fresno', 'Madera', 'Merced', 'Tulare', 'Stanislaus')
+counties <- c(bay_counties, south_counties)
+
+# load data
+path <- 'data'
+adj_counties <- read.csv(paste0('data/', 'county_adjacency2010', '.csv'))
+counts <- read.csv(paste0('data/', 'counts', '.csv'))
+counts$date <- as.Date(counts$date)
+abridged <- read.csv(paste0('data/', 'county_data_abridged', '.csv'))
+
+# clean data
+filtered_adj_counties <- filterAdjCounties(adj_counties, counties)
+full_data <- makeFullData(filtered_adj_counties, counts, abridged)
+
+# get fipscounty for bay and south area
+county_fips <- full_data %>%
+  select(fipscounty, countyname) %>%
+  distinct()
+fips_ind <- sapply(1:nrow(county_fips), function(x){
+  checkCounty(county_fips$countyname[x], bay_counties)
+})
+county_fips$ifbaycounty <- fips_ind
+```
+
+# Introduction  
+The coronavirus (COVID-19) pandemic is an ongoing pandemic caused by severe acute respiratory syndrome coronavirus 2 (SARS-CoV-2). The first case was identified in December 2019 and the World Health Organization (WHO) declared it as a pandemic. According to WHO, no country has suffered more cases or deaths than the US, which as of December 2020 has not been able to efficiently contain the virus or prevent it from spreading. When no measures of social distancing are taken, the number of COVID-19 cases grows exponentially in a given area, as a result hospitals may be ill-equipped to help those in need.  
+
+Accurate predictions of the number of deaths/cases in a given area can help decision makers to better distribute the equipment especially PPE for front-line workers and reduce the number of deaths caused by SARS-CoV-2. On this project, we will investigate the prediction methods proposed by the YU Group as well as propose two new methods for predicting the number of cases/deaths per county. 
+
+# The dataset  
+To train our predictors, we used the data provided to us from Yu Group’s covid19-severity-prediction repository. While many features were available, we decided to use the number of cumulative cases/deaths as our main features to predict the future values of the same variable. While this decision neglects many features that may be useful for improving accuracy, we prioritized getting a decent predictor, rather than risking a more complicated one that would be harder to implement. The earliest records of cases and deaths from the dataset are from January 27, 2020. For this project, we look at counties from Bay Area and South Central Valley. However, to train the shared model, we used data from all counties available rather than just the counties we were instructed to predict for, due to an improvement in accuracy.
+
+```{r linear model - data preprocessing}
+# preprocess data for linear model
+countyFIPS <- unique(full_data$fipscounty)
+death_obj <- make_counts(full_data, 'death', countyFIPS)
+case_obj <- make_counts(full_data, 'case', countyFIPS)
+```
+
+```{r linear model - run and predict, warning=FALSE}
+# set target k
+target_day <- c(1, 3, 5, 7, 14)
+# run linear model pred
+model2_death_pred <- linear_model(death_obj, target_day, 
+                                  countyFIPS, full_data,
+                                  'cumdeathstot')
+model2_case_pred <- linear_model(case_obj, target_day, 
+                                 countyFIPS, full_data,
+                                 'cumcasestot')
+# combine cases and deaths
+model2_pred <- model2_case_pred %>%
+  inner_join(model2_death_pred, 
+             by = c('fipscounty','predict_date','k'),
+             suffix = c('.cases','.deaths'))
+```
+
+```{r model3}
+# ==========================================================
+# Model 3 takes a long time to run so use these codes to rerun
+# the model. otherwise, load saved predictions
+# ==========================================================================
+# model3_case_pred <- getPoisPreds(cases = TRUE)
+# model3_death_pred <- getPoisPreds(cases = FALSE)
+# write.csv(model3_case_pred, 'data/model3_case_pred.csv', row.names = FALSE)
+# write.csv(model3_death_pred, 'data/model3_death_pred.csv', row.names = FALSE)
+# ===========================================================================
+
+model3_case_pred <- read.csv('other/model3_case_pred.csv')
+model3_death_pred <- read.csv('other/model3_death_pred.csv')
+# combine cases and deaths
+model3_pred <- model3_case_pred %>%
+  inner_join(model3_death_pred, 
+             by = c('fipscounty','predict_date','k'),
+             suffix = c('.cases','.deaths'))
+```
+
+```{r}
+# ======================================================================
+# run this chunk of code if you want to retrain CLEP for model 2 and 3
+# ======================================================================
+# # cases
+# model3_2_cases <- model3_case_pred %>% filter(k == 5) %>%
+#   mutate(model = 'model3',
+#          predict_date = as.Date(predict_date)) %>%
+#   select(-k) %>%
+#   rbind(model2_case_pred %>% ungroup() %>%
+#           filter(k == 5) %>%
+#           mutate(model = 'model2',
+#                  predict_date = as.Date(predict_date)) %>%
+#           select(-k))
+# truth_data_cases <- full_data %>%
+#   select(fipscounty, date, cumcasestot) %>%
+#   rename(truth = cumcasestot) %>%
+#   distinct()
+# clep_cases <- performCLEP(model3_2_cases, truth_data_cases, 5, 1, 0.5)
+# 
+# 
+# # deaths
+# model3_2_deaths <- model3_death_pred %>% filter(k == 5) %>%
+#   mutate(model = 'model3',
+#          predict_date = as.Date(predict_date)) %>%
+#   select(-k) %>%
+#   rbind(model2_death_pred %>% ungroup() %>%
+#           filter(k == 5) %>%
+#           mutate(model = 'model2',
+#                  predict_date = as.Date(predict_date)) %>%
+#           select(-k))
+# truth_data_deaths <- full_data %>%
+#   select(fipscounty, date, cumdeathstot) %>%
+#   rename(truth = cumdeathstot) %>%
+#   distinct()
+# clep_deaths <- performCLEP(model3_2_deaths, truth_data_deaths, 5, 1, 0.5)
+# write.csv(clep_cases, 'other/paper_clep_cases.csv')
+# write.csv(clep_deaths, 'other/paper_clep_deaths.csv')
+# ======================================================================
+
+clep_cases <- read.csv('other/paper_clep_cases.csv')
+clep_deaths <- read.csv('other/paper_clep_deaths.csv')
+
+# join deaths and cases
+paper_clep_pred <- clep_cases %>%
+  rename(pred = clep) %>%
+  inner_join(clep_deaths %>%
+               rename(pred = clep), 
+             by = c('county','date'),
+             suffix = c('.cases','.deaths'))
+
+```
+
+# Our Own Model Implementation
+We choose to use time series model, Auto Regression Integrated Moving Average (ARIMA) and moving average to predict the cumulative Covid-19 cases and deaths. Since the purpose of this project is to help hospitals keep track of PPE supply, it is better to overestimate than underestimate. We test models with different time intervals, and we notice that the models perform better with smaller time gap. However, choosing too small time gap would make it hard on the logistic side of PPE supply i.e. the problems with ordering and shipping PPE between locations. Therefore, we decide to use 5 days as our time gap that would give enough time for shipping and maintain high performance of the models. In addition, we use the data since the beginning up until August 28 which is the minimum date that all counties have at least 1% of their population tested positive to Covid-19. We use the estimated population in 2018 to estimate the percentage. We choose this range to ensure all counties have enough data to have stable predictions. We will compare models' performance from September 2, 2020 (5 days after August 28, 2020) to November 17, 2020 to choose the best model
+
+## ARIMA model
+Our first model is ARIMA. When implementing the model, we need at least two observations to make the prediction. Therefore, when a county only has one historical value, we use the average of all historical data of neighbor counties as our prediction. The case when a county does not have enough data usually happens at the beginning of the pandemic; hence, using all historical data of neighbor counties would capture both situations, beginning and the current situations of neighbor counties' data records. To implement ARIMA model, we use `auto.arima` function. We also include a condition that the prediction must be at least the last observation to ensure the monoticity of cumulative counts.  
+```{r predict time period}
+# we extend the start time to 08-01-2020 to 
+# get data but the real prediction is 
+# from 09-02-2020
+predict_time_period <- seq(as.Date('08-01-2020', format = '%m-%d-%y'),
+                           as.Date('11-17-2020', format = '%m-%d-%y'), 1)
+```
+
+```{r arima}
+## cases
+arima_case_pred <- getARIMAPred(predict_time_period, full_data, 5, 'cases')
+## deaths
+arima_death_pred <- getARIMAPred(predict_time_period, full_data, 5, 'deaths')
+# combine cases and deaths
+arima_pred <- arima_case_pred %>%
+  inner_join(arima_death_pred, 
+             by = c('fipscounty','predict_date','k'),
+             suffix = c('.cases','.deaths'))
+```
+
+## Moving Average
+Our second model is a moving average model on the rate of change in cumulative counts. We first calculate the rate of change of cumulative counts over the last 7 days and use the average as the rate of change for the next 5 days. The prediction equals $y_{t-5}^c(1+\frac{1}{7}\sum_{i = 1}^7(r_{t - 5 -i}))^5$. We choose to calculate the average rate of change of 7 days because of the seasonality of the data over the week period. There are two special cases that we treat in the algorithm. The first one is when a county only has one observation, the treatment is the same as in ARIMA model. The second special case is when the cumulative counts of previous date is 0, we will impute 0.25 as the rate of change. The value 0.25 is chosen after trying different values and observing the predictions do not change much with value 0.25. For counties with the number of data points more than one but less than 7, we still use the average of previous days' rate of change to predict the future cumulative count.
+
+```{r moving average}
+## cases
+ma_case_pred <- getMovingAvgPred(predict_time_period, full_data, 5, 'cases')
+## deaths
+ma_death_pred <- getMovingAvgPred(predict_time_period, full_data, 5, 'deaths')
+# combine cases and deaths
+ma_pred <- ma_case_pred %>%
+  inner_join(ma_death_pred, 
+             by = c('fipscounty','predict_date','k'),
+             suffix = c('.cases','.deaths'))
+```
+
+
+## Ensemble of ARIMA and MA models
+We implemented the CLEP model in the paper with the linear and exponential models in the previous part, but we didn't tune the hyper-parameters $c$ and $\mu$. We just plugged in the same values as mentioned in the paper ($c$ = 1 and $\mu$ = 0.5). Now we'd like to look deeper into the choice of the hyper-parameters for our CLEP model built with the ARIMA and MA models, and we will look at it separately for bay area counties and the south valley counties.
+
+As discussed in the paper, for $\mu$, the authors tried with different values in the range of 0.5 to 0.9, while for $c$, they just used the default value 1. Inspired by the discussion in the paper, we tried with three different values separately for $c$ and $\mu$ ($c$ = (1, 1.5, 2) ; $\mu$ = (0.5, 0.6, 0.7)) and tested with the permutation of the values on the CLEP model to see which set of the hyper-parameters gave the best performance. Note the candidate lists of c and mu are set to be the same for both bay area counties and south central valley counties. To evaluate the performance of the CLEP models, we look at the following five evaluation metrics: coverage, normalized error, MAPE, rawMAE and sqrtMAPE. After comparing the evaluation results of the nine CLEP models for each set of counties, we found that the choice of $c$ = 2 and $\mu$ = 0.5 performed best in not only the bay area CLEP models but the south central valley CLEP models, and for both cases and deaths predictions. So we set the hyper-parameters to be $c$ = 2 and $\mu$ = 0.5 for our CLEP model of ARIMA and MA models.
+```{r our clep tune - cases}
+# cases
+model_arima_ma_cases_all <- arima_case_pred %>%
+  mutate(model = 'arima',
+         predict_date = as.Date(predict_date)) %>%
+  select(-k) %>%
+  rbind(ma_case_pred %>% ungroup() %>%
+          mutate(model = 'ma',
+                 predict_date = as.Date(predict_date)) %>%
+          select(-k)) %>%
+  left_join(county_fips,
+            by = c('fipscounty')) %>%
+  select(-countyname)
+
+truth_data_cases_all <- full_data %>%
+  filter(date %in% predict_time_period) %>%
+  select(fipscounty, date, cumcasestot) %>%
+  rename(truth = cumcasestot) %>%
+  distinct() %>%
+  left_join(county_fips,
+            by = c('fipscounty')) %>%
+  select(-countyname)
+
+# subsetting data into two county clusters
+bay_model_arima_ma_cases <- model_arima_ma_cases_all %>%
+  filter(ifbaycounty == TRUE)
+
+south_model_arima_ma_cases <- model_arima_ma_cases_all %>%
+  filter(ifbaycounty == FALSE)
+
+bay_truth_data_cases <- truth_data_cases_all %>%
+  filter(ifbaycounty == TRUE)
+
+south_truth_data_cases <- truth_data_cases_all %>%
+  filter(ifbaycounty == FALSE)
+```
+
+```{r our clep tune - deaths}
+# deaths
+model_arima_ma_deaths_all <- arima_death_pred %>%
+  mutate(model = 'arima',
+         predict_date = as.Date(predict_date)) %>%
+  select(-k) %>%
+  rbind(ma_death_pred %>% ungroup() %>%
+          mutate(model = 'ma',
+                 predict_date = as.Date(predict_date)) %>%
+          select(-k)) %>%
+  left_join(county_fips,
+            by = c('fipscounty')) %>%
+  select(-countyname)
+  
+truth_data_deaths_all <- full_data %>%
+  filter(date %in% predict_time_period) %>%
+  select(fipscounty, date, cumdeathstot) %>%
+  rename(truth = cumdeathstot) %>%
+  distinct() %>%
+  left_join(county_fips,
+            by = c('fipscounty')) %>%
+  select(-countyname)
+
+# subsetting data into two county clusters
+bay_model_arima_ma_deaths <- model_arima_ma_deaths_all %>%
+  filter(ifbaycounty == TRUE)
+
+south_model_arima_ma_deaths <- model_arima_ma_deaths_all %>%
+  filter(ifbaycounty == FALSE)
+
+bay_truth_data_deaths <- truth_data_deaths_all %>%
+  filter(ifbaycounty == TRUE)
+
+south_truth_data_deaths <- truth_data_deaths_all %>%
+  filter(ifbaycounty == FALSE)
+```
+
+```{r clep-tuning}
+# =============================================================================
+# if you want to tune CLEP for ARIMA and MA model, run this chunk of code
+# =============================================================================
+# tuneCLEPOnce(bay_model_arima_ma_cases,
+#              bay_model_arima_ma_deaths,
+#              south_model_arima_ma_cases,
+#              south_model_arima_ma_deaths,
+#              bay_truth_data_cases,
+#              bay_truth_data_deaths,
+#              south_truth_data_cases,
+#              south_truth_data_deaths,
+#              full_data,
+#              predict_time_period,
+#              county_fips,
+#              c_list = c(1, 1.5, 2), 
+#              mu_lst = c(0.5, 0.6, 0.7))
+# =============================================================================
+```
+
+
+```{r clep-arima-ma}
+# ======================================================================
+# run this chunk of code if you want to retrain CLEP for ARIMA and MA
+# ======================================================================
+# # to run the best clep model for ARIMA and MA:
+# clep_cases_pred <- performCLEP(model_arima_ma_cases_all,
+#                                truth_data_cases_all, 5, 2, 0.5)
+# clep_deaths_pred <- performCLEP(model_arima_ma_deaths_all,
+#                                 truth_data_deaths_all, 5, 2, 0.5)
+# write.csv(clep_cases_pred, 'other/our_clep_cases.csv')
+# write.csv(clep_deaths_pred, 'other/our_clep_deaths.csv')
+# ======================================================================
+
+clep_cases_pred <- read.csv('other/our_clep_cases.csv')
+clep_deaths_pred <- read.csv('other/our_clep_deaths.csv')
+our_clep_pred <- clep_cases_pred %>%
+  rename(pred = clep) %>%
+  inner_join(clep_deaths_pred %>%
+               rename(pred = clep), 
+             by = c('county','date'),
+             suffix = c('.cases','.deaths'))
+```
+
+# Model Evaluation
+## Best Model
+
+We plot the metric values for models: Linear, Shared Exponential, ARIMA, Moving Average, Linear-Shared Exponential CLEP and ARIMA-MA CLEP in Figure 1 to evaluate their performance on cumulative cases and deaths related to Covid-19 on the period from September 02, 2020 to November 17, 2020. On the radar plot, instead of using Coverage metric, we use Not Covered metric `(Not.Covered = 1 - Coverage)`. Hence, on Figure 1, we look for model that has the smallest circumstance as the best performed model. To calculate the values for these metrics, we use the medians of these metrics' measurements calculated from all the dates listed above across all counties (both Bay Area and South Central Valley). For cumulative cases, ARIMA-MA CLEP model performs the best in all metric aspects except for the Not Covered percentage. Linear model has the lowest non-coverage but comparing other metrics, linear model is not the best. ARIMA-MA CLEP model is also the best model in predicting cumulative deaths in all metrics. Since the objective of this project is to support the distribution of PPE supply, we choose ARIMA-MA CLEP model as our final model for having the best performance in predicting numbers of cumulative deaths. We make this decision because not everyone who is tested positive to Covid-19 would be admitted to the hospitals, only the severe cases. Therefore, the number of cumulative deaths would be more relevant in estimating the needed PPE supply in hospitals. 
+```{r}
+full.data <- full_data %>%
+    select(fipscounty, date, cumcasestot, cumdeathstot) %>%
+    rename(predict_date = date,
+           pred.cases = cumcasestot,
+           pred.deaths = cumdeathstot) %>%
+    filter(predict_date %in% predict_time_period) %>%
+    distinct() %>%
+    mutate(model = 'truth')
+full.data <- as.data.frame(full.data)
+all_models_pred <- rbind(
+  model2_pred %>%
+     ungroup() %>%
+     filter(k == 5) %>%
+     select(fipscounty, predict_date, pred.cases, pred.deaths) %>%
+     mutate(model = 'model2'),
+  model3_pred %>%
+    mutate(predict_date = as.Date(predict_date)) %>%
+    filter(k == 5) %>%
+    select(fipscounty, predict_date, pred.cases, pred.deaths) %>%
+    mutate(model = 'model3'),
+  paper_clep_pred %>%
+    rename(fipscounty = county,
+           predict_date = date) %>%
+    select(fipscounty, predict_date, pred.cases, pred.deaths) %>%
+    mutate(model = 'paper_clep'),
+  arima_pred %>%
+    filter(k == 5) %>%
+    select(fipscounty, predict_date, pred.cases, pred.deaths) %>%
+    mutate(model = 'arima'),
+  ma_pred %>%
+    filter(k == 5) %>%
+    select(fipscounty, predict_date, pred.cases, pred.deaths) %>%
+    mutate(model = 'ma'),
+  our_clep_pred %>%
+    rename(fipscounty = county,
+           predict_date = date) %>%
+    select(fipscounty, predict_date, pred.cases, pred.deaths) %>%
+    mutate(model = 'our_clep'),full.data
+)
+all_models_pred <- all_models_pred %>%
+  mutate(k = 5) %>%
+  rename(date = predict_date) %>%
+  filter(between(date, 
+                 as.Date('09-02-2020', format = '%m-%d-%y'),
+                 as.Date('11-17-2020', format = '%m-%d-%y')) )
+
+```
+
+```{r}
+# Color vector
+colors_border <- brewer.pal(6, 'Dark2')
+## cases
+cases_metrics_df <- calcAllMetrics(all_models_pred %>%
+                                     select(-c(pred.deaths)))
+                                    
+# change coverage to no coverage for radarplot
+cases_metrics_df <- cases_metrics_df %>%
+  mutate(Not.Covered = 1 - coverage) %>%
+  rename(MAPE = mape,
+         rawMAE = rawmae,
+         sqrtMAE = sqrtmape,
+         Normalized.Error = normalized_error) %>%
+  select(-coverage)
+cases_radar_df <- getRadarData(cases_metrics_df)
+rownames(cases_radar_df) <- c('Linear','Shrd Exp','Lin-Exp CLEP',
+                              'ARIMA','MA','ARIMA-MA CLEP')
+## deaths
+deaths_metrics_df <- calcAllMetrics(all_models_pred %>%
+                                      select(-pred.cases))
+                                   
+deaths_metrics_df <- deaths_metrics_df %>%
+  mutate(Not.Covered = 1 - coverage) %>%
+  rename(MAPE = mape,
+         rawMAE = rawmae,
+         sqrtMAE = sqrtmape,
+         Normalized.Error = normalized_error) %>%
+  select(-coverage)
+deaths_radar_df <- getRadarData(deaths_metrics_df)
+rownames(deaths_radar_df) <- c('Linear','Shrd Exp','Lin-Exp CLEP',
+                               'ARIMA','MA','ARIMA-MA CLEP')
+
+# plotting
+par(mfrow = c(1, 1), mar = c(0.1, 0.1, 0.1, 3))
+# The default radar chart 
+radarchart(cases_radar_df,maxmin = FALSE, pcol = colors_border
+           , plty = 1, vlcex = 0.7)
+# Add a legend
+legend(x = 1, y = 1.3, legend = rownames(deaths_radar_df), 
+       bty = "n", pch = 20 , cex = 1, pt.cex = 1, col = colors_border)
+
+```
+
+```{r radar-plots, fig.cap="Radar plots for all models' performance on predicting cumulative cases (top) and deaths (bottom)"}
+# radar_case <- recordPlot()
+par(mfrow = c(1,1), mar = c(0.01, 1, 0.1, 1))
+radarchart(deaths_radar_df, maxmin = FALSE, pcol = colors_border,
+           plty = 1, vlcex = 0.7)
+
+```
+
+## Ensemble Method  
+The CLEP method can be viewed as a past-performance-based ensemble method. The basic idea is to give more weight to the prediction of a model that has shown better results over the past week. 
+
+We start by looking at Yu group's CLEP predictors:
+
+```{r, fig.cap="Clep prediction using the Yu group linear and shared exponential predictions. We show 3 days ahead prediction, the dashed line indicates the true values"}
+fipscounty <- 6001
+k.val <- 7
+mu <- 0.5
+c <- 1
+cases <- vizClepW(fipscounty, TRUE, k.val, mu, c)
+deaths <- vizClepW(fipscounty, FALSE, k.val, mu, c) 
+
+ggarrange(cases, deaths, ncol = 2, common.legend = TRUE)
+
+
+```
+
+Looking at the CLEP weights we see no particular trend, and that both methods obtain similar weighting. One particular interesting observation is that the shared model makes relatively poor predictions for the cases variable from April to August.
+
+```{r, fig.cap='Shared exponential cases predicitons vs the true value'}
+preds <- getPoisPreds(cases=TRUE)
+ks <- c(7)
+pred_type <- "cumcasestot"
+sc <- performSanityCheck(preds, pred_type, ks, fipscounty)
+sc[[1]]
+```
+
+Observing the prediction, a clear flaw of this shared exponential is evident. It constantly underpredicts the number of cases for a long period. 
+
+We now perform a similar analysis to our ARIMA and MA CLEP method:  
+
+```{r, fig.cap="Clep prediction using our ARIMA and MA models. We show 7 days ahead prediction, the dashed line indicates the true values"}
+fipscounty <- 6001
+k.val <- 7
+mu <- 0.5
+c <- 2
+cases <- vizClepWUs(fipscounty, TRUE, k.val, mu, c) + theme(legend.position = "none")
+deaths <- vizClepWUs(fipscounty, FALSE, k.val, mu, c) 
+
+ggarrange(cases, deaths, ncol = 2, common.legend = TRUE)
+
+```
+
+We see CLEP chooses similar weights to the ARIMA and MA models, which makes sense as MA can be seen as a specific case of ARIMA model and we would expect those models to be similar in terms of performance. 
+
+## Model performance between clusters of counties and within each cluster
+To see if there are any differences in the two clusters of counties, we plot the box plots of the results of the five evaluation metrics for each model, and for cases and deaths predictions separately. We first look at the evaluation results in cases predictions. We can see that coverage, rawMAE and sqrtMAE are generally higher in south central valley counties, while MAPE and normalized error are higher in bay area counties. Another thing worth noticing is that the variance of the normalized error of bay area counties are also generally larger than that of south central valley counties. Next, we take a look at the evaluation results in death predictions. It is obvious to see at first glance that the variance of the five evaluation results of south central valley counties in the shared exponential model is much larger than that of the others. Furthermore, the evaluation results in bay area counties are generally worse than that in south central valley counties. To be more precise, for deaths predictions, the coverage is lower, while the MAPE, normalized error, rawMAE and sqrtMAE are all higher in bay area counties than that in south central valley counties for all models except the shared exponential model.
+```{r cluster differences, fig.cap = "Models' performance between bay area counties and south central valley counties", fig.height = 6}
+# cases
+cases_metrics_df <- do.call(rbind,
+                            lapply(county_fips$fipscounty, function(x){
+                              data <- all_models_pred %>%
+                                filter(fipscounty == x) %>%
+                                select(-pred.deaths)
+                              metrics <- calcAllMetrics(data) %>%
+                                mutate(fipscounty = x)
+                              return(metrics)}))
+
+cases_metrics_df_long <- cases_metrics_df %>%
+  inner_join(county_fips, by = 'fipscounty') %>%
+  pivot_longer(-c(fipscounty, model, countyname, ifbaycounty), 
+               names_to = 'metrics', values_to = 'values')
+
+model_names <- c('ARIMA', 'MA', 'Linear', 'Shared Exp', 
+                 'ARIMA-MA CLEP', 'Linear-Exp CLEP')
+metric_names <- c('Coverage', 'MAPE', 'Normalized Error', 'rawMAE', 'sqrtMAE')
+new_metric_names <- c('Coverage','Normalized Error','MAPE', 'rawMAE','sqrtMAE')
+
+cases_metrics_df_long$metrics <- factor(cases_metrics_df_long$metrics,
+                                           labels = metric_names)
+cases_metrics_df_long$model <- factor(cases_metrics_df_long$model,
+                                           labels = model_names)
+
+cases_cluster_metric_plot <- ggplot(cases_metrics_df_long, 
+                                    aes(model, values, color = ifbaycounty)) +
+  geom_boxplot() +
+  facet_wrap(.~metrics, nrow = 1, scales = 'free_y') +
+  scale_color_viridis(discrete = TRUE, 
+                     labels = c('South Central Valley','Bay Area')) +
+  labs(title = 'Cases', y = NULL, x = NULL, color = NULL) +
+  theme_bw() +
+ theme(legend.position = 'top',
+        strip.background = element_rect(fill = 'white', color = 'white'),
+        axis.text.x = element_text(angle = 45, size = 5)) 
+
+# deaths
+deaths_metrics_df <- do.call(rbind,
+                             lapply(county_fips$fipscounty, function(x){
+                               data <- all_models_pred %>%
+                                filter(fipscounty == x) %>%
+                                select(-pred.cases)
+                              metrics <- calcAllMetrics(data) %>%
+                                mutate(fipscounty = x)
+                              return(metrics)}))
+
+deaths_metrics_df_long <- deaths_metrics_df %>%
+  inner_join(county_fips, by = 'fipscounty') %>%
+  pivot_longer(-c(fipscounty, model, countyname, ifbaycounty), 
+               names_to = 'metrics', values_to = 'values')
+deaths_metrics_df_long$metrics <- factor(deaths_metrics_df_long$metrics,
+                                           labels = metric_names)
+deaths_metrics_df_long$model <- factor(deaths_metrics_df_long$model,
+                                           labels = model_names)
+
+deaths_cluster_metric_plot <- ggplot(deaths_metrics_df_long, 
+                                     aes(model, values, color = ifbaycounty)) +
+  geom_boxplot() +
+  facet_wrap(.~metrics, nrow = 1, scales = 'free_y') +
+  scale_color_viridis(discrete = TRUE, 
+                     labels = c('South Central Valley','Bay Area')) +
+  labs(title = 'Deaths', y = NULL, x = NULL, color = NULL) +
+  theme_bw() +
+  theme(legend.position = 'top',
+        strip.background = element_rect(fill = 'white', color = 'white'),
+        axis.text.x = element_text(angle = 45, size = 5)) 
+
+
+cluster_metrics_plot <- ggarrange(cases_cluster_metric_plot,
+                                  deaths_cluster_metric_plot,
+                                  nrow = 2,
+                                  common.legend = TRUE)
+cluster_metrics_plot
+
+```
+
+```{r cluster differences - within group - cases, eval = FALSE}
+# investigate difference within cluster
+# bay cases
+bay_cases_metrics_df_long <- cases_metrics_df_long %>%
+  filter(ifbaycounty == TRUE)
+bay_countyfips <- unique(bay_cases_metrics_df_long$fipscounty)
+bay_county_plot <- list()
+bay_county <- c()
+# plot radar plot for each county
+for(i in bay_countyfips){
+  tmp_county_df <- bay_cases_metrics_df_long %>%
+    filter(fipscounty == i)
+  county <- tmp_county_df[1, ]$countyname
+  end <- unlist(gregexpr(pattern ='County', county))
+  county <- substring(county, 1, end-1)
+  bay_county <- c(bay_county, county)
+  tmp_county_df <- tmp_county_df %>%
+    select(-c('fipscounty', 'countyname', 'ifbaycounty')) %>%
+    pivot_wider(names_from = metrics, values_from = values) %>%
+    mutate(not.covered = 1 - Coverage) %>%
+    rename(NC = not.covered) %>%
+    select(-Coverage)
+  tmp_radar_df <- getRadarData(tmp_county_df)
+  radarchart(tmp_radar_df,maxmin = FALSE, pcol=colors_border
+             , plty = 1, vlcex = 0.5, title = paste(county),
+             cex.main = 0.7)
+  p <- recordPlot()
+  bay_county_plot[[county]] <- p
+}
+
+# south cases
+south_cases_metrics_df_long <- cases_metrics_df_long %>%
+  filter(ifbaycounty == FALSE)
+south_countyfips <- unique(south_cases_metrics_df_long$fipscounty)
+south_county_plot <- list()
+south_county <- c()
+# plot radar plot for each county
+for(i in south_countyfips){
+  tmp_county_df <- south_cases_metrics_df_long %>%
+    filter(fipscounty == i)
+  county <- tmp_county_df[1, ]$countyname
+  end <- unlist(gregexpr(pattern ='County', county))
+  county <- substring(county, 1, end-1)
+  south_county <- c(south_county, county)
+  tmp_county_df <- tmp_county_df %>%
+    select(-c('fipscounty', 'countyname', 'ifbaycounty')) %>%
+    pivot_wider(names_from = metrics, values_from = values) %>%
+    mutate(not.covered = 1 - Coverage) %>%
+    rename(NC = not.covered) %>%
+    select(-Coverage)
+  tmp_radar_df <- getRadarData(tmp_county_df)
+  radarchart(tmp_radar_df,maxmin = FALSE, pcol=colors_border,
+             plty = 1, vlcex = 0.5, title = paste(county),
+             cex.main = 0.7)
+  p <- recordPlot()
+  south_county_plot[[county]] <- p
+}
+```
+
+```{r, eval = FALSE}
+ggarrange(plotlist = bay_county_plot) %>%
+  ggexport(filename = "other/bay_cases_model.pdf")
+
+ggarrange(plotlist = south_county_plot) %>%
+  ggexport(filename = "other/south_cases_model.pdf")
+```
+Now we look at the performance of the models within each geographical area. We discuss the models' performance in cases prediction first. For the nine bay area counties, we can observe a similar trend of ranking of the model performances in most of the counties. For example, the ARIMA-MA clep model tends to perform best, and the linear and exponential models tend to perform worse in Alameda, Contra Costa, Napa, San Francisco, San Mateo, Solano and Sonoma counties. While the performance of the models behaves more differently in Marin and Santa Clara counties. In Marin, the ARIMA model seems to perform worst, and the performances of all the other models don't differ much. In Santa Clara, it is only clear that the linear model perform worst solely. In the five south central valley counties, the ARIMA-MA clep model performs the best, but the worst-performing models actually differ, and we can further divide the south counties into two groups based on them. For Madera, Merced and Tulare, it is the linear model that performs the worst, while for Fresno and Stanislaus, it is the exponential model that performs the worst. The radar plots for this analysis are excluded in the report due to the page limit, but they can be found at `other/bay_cases_model.pdf` and `other/south_cases_model.pdf`.
+
+```{r cluster differences - within group - deaths, eval = FALSE}
+# investigate difference within cluster
+# bay deaths
+bay_deaths_metrics_df_long <- deaths_metrics_df_long %>%
+  filter(ifbaycounty == TRUE)
+bay_countyfips <- unique(bay_deaths_metrics_df_long$fipscounty)
+bay_county_death_plot <- list()
+bay_county <- c()
+# plot radar plot for each county
+for(i in bay_countyfips){
+  tmp_county_df <- bay_deaths_metrics_df_long %>%
+    filter(fipscounty == i)
+  county <- tmp_county_df[1, ]$countyname
+  end <- unlist(gregexpr(pattern ='County', county))
+  county <- substring(county, 1, end-1)
+  bay_county <- c(bay_county, county)
+  tmp_county_df <- tmp_county_df %>%
+    select(-c('fipscounty', 'countyname', 'ifbaycounty')) %>%
+    pivot_wider(names_from = metrics, values_from = values) %>%
+    mutate(not.covered = 1 - Coverage) %>%
+    rename(NC = not.covered) %>%
+    select(-Coverage)
+  tmp_radar_df <- getRadarData(tmp_county_df)
+  radarchart(tmp_radar_df,maxmin = FALSE, pcol=colors_border,
+             plty = 1, vlcex = 0.5, title = paste(county),
+             cex.main = 0.7)
+  p <- recordPlot()
+  bay_county_death_plot[[county]] <- p
+}
+
+# south deaths
+south_deaths_metrics_df_long <- deaths_metrics_df_long %>%
+  filter(ifbaycounty == FALSE)
+south_countyfips <- unique(south_deaths_metrics_df_long$fipscounty)
+south_county_death_plot <- list()
+south_county <- c()
+# plot radar plot for each county
+for(i in south_countyfips){
+  tmp_county_df <- south_deaths_metrics_df_long %>%
+    filter(fipscounty == i)
+  county <- tmp_county_df[1, ]$countyname
+  end <- unlist(gregexpr(pattern ='County', county))
+  county <- substring(county, 1, end-1)
+  south_county <- c(south_county, county)
+  tmp_county_df <- tmp_county_df %>%
+    select(-c('fipscounty', 'countyname', 'ifbaycounty')) %>%
+    pivot_wider(names_from = metrics, values_from = values) %>%
+    mutate(not.covered = 1 - Coverage) %>%
+    rename(NC = not.covered) %>%
+    select(-Coverage)
+  tmp_radar_df <- getRadarData(tmp_county_df)
+  radarchart(tmp_radar_df,maxmin = FALSE, pcol=colors_border,
+             plty = 1, vlcex = 0.5, title = paste(county),
+             cex.main = 0.7)
+  p <- recordPlot()
+  south_county_death_plot[[county]] <- p
+}
+```
+
+```{r, eval = FALSE}
+ggarrange(plotlist = bay_county_death_plot) %>%
+  ggexport(filename = "other/bay_deaths_model.pdf")
+
+ggarrange(plotlist = south_county_death_plot) %>%
+  ggexport(filename = "other/south_deaths_model.pdf")
+```
+
+We next look at the models' performance on death predictions for each geographical area. In the nine bay area counties, we observe approximately two trends of rankings of models' performance. In Contra Costa, Marin, San Mateo, Solano and Sonoma, the linear and MA models seem to perform worse, and the exponential model tend to perform best. While in Alameda, Napa, San Francisco and Santa Clara, the exponential model is the worst-performing model, and the MA performs the best. For the five south central valley counties, in Fresno, Stanislaus and Tulare, the exponential model is the worst-performing model, and the ARIMA-MA is the best model. However, the ranking of the models' performance is not so clear in Madera and Merced. To be more precise, there is not a distinct winner model or a loser model in Merced. In addition, it is only clear that for Madera the exponential model is the best-performing, while the rest perform comparably worse. The radar plots for this analysis are excluded in the report due to the page limit, but they can be found at `other/bay_deaths_model.pdf` and `other/south_deaths_model.pdf`.
+
+# Best Model Investigation
+```{r one-week-predictions}
+# need to extend the time since CLEP needs longer historical data
+one_week_period <- seq(as.Date('10-23-2020', format = '%m-%d-%y'),
+                       as.Date('12-04-2020', format = '%m-%d-%y'), 1)
+# make predictions
+one_week_cases <- getOneWeekPred(one_week_period, full_data, 5, 'cases')
+one_week_deaths <- getOneWeekPred(one_week_period, full_data, 5, 'deaths')
+```
+
+
+```{r one-week-pred-data} 
+# combine predictions
+one_week_pred <- one_week_cases %>%                         
+  select(date, county, clep) %>%
+  rename(pred = clep) %>%
+  inner_join(one_week_deaths %>%
+               select(date, county, clep) %>%
+               rename(pred = clep), 
+             by = c('county', 'date'),
+             suffix = c('_cases', '_deaths')) %>%
+  inner_join(full_data %>%
+               select(fipscounty, date, cumcasestot, cumdeathstot) %>%
+               distinct(),
+             by = c('county' = 'fipscounty', 'date')) %>%
+  filter(between(date,
+                 # true one week period starts from 11-28, but wee need 
+                 # historical data for MEPI
+                 as.Date('11-23-2020', format = '%m-%d-%y'),
+                 as.Date('12-04-2020', format = '%m-%d-%y'))) %>%
+  rename(fipscounty = county,
+         predict_date = date)
+# convert to long
+one_week_pred_long <- one_week_pred %>%
+  rename(truth_cases = cumcasestot,
+         truth_deaths = cumdeathstot) %>%
+  pivot_longer(-c(fipscounty, predict_date),
+               names_to = c('value_type', 'pred_type'),
+               names_sep = '_',
+               values_to = 'value') %>%
+  mutate(k = 5) %>%
+  select(fipscounty, k, predict_date, value_type, pred_type, value)
+```
+
+```{r one-week metric}
+one_week_predict_period <- seq(as.Date('11-28-2020', format = '%m-%d-%y'),
+                               as.Date('12-04-2020', format = '%m-%d-%y'), 1)
+# calculate metrics
+## cases
+one_week_cases_metrics_df <- do.call(rbind,
+                                     lapply(county_fips$fipscounty,
+                                            calcOneWeekMetrics,
+                                            one_week_pred_long,
+                                            'cases', 
+                                            one_week_predict_period,
+                                            'clep'))
+## deaths
+one_week_deaths_metrics_df <- do.call(rbind,
+                                     lapply(county_fips$fipscounty,
+                                            calcOneWeekMetrics,
+                                            one_week_pred_long,
+                                            'deaths', 
+                                            one_week_predict_period,
+                                            'arima'))
+
+```
+
+
+## Evaluate the fit of the model
+```{r one-week-metrics-plot, fig.cap="ARIMA-MA CLEP model's performance on November 28, 2020 to December 04, 2020 on predicting cumulative cases and deaths for Bay Area and South Central Valley counties"}
+# cases
+one_week_cases_metrics_df_long <- one_week_cases_metrics_df %>%
+  inner_join(county_fips, by = 'fipscounty') %>%
+  pivot_longer(-c(fipscounty, model, countyname, ifbaycounty), 
+               names_to = 'metrics', values_to = 'values')
+one_week_cases_metrics_df_long$metrics <- factor(
+  one_week_cases_metrics_df_long$metrics, labels = metric_names)
+one_week_cases_metrics_df_long$metrics <- factor(
+  one_week_cases_metrics_df_long$metrics, levels = new_metric_names)
+one_week_cases_metric_plot <- ggplot(one_week_cases_metrics_df_long, 
+                                     aes(y = values, color = ifbaycounty)) +
+  geom_boxplot() +
+  facet_wrap(.~metrics, nrow = 1, scales = 'free_y') +
+  scale_color_viridis(discrete = TRUE, 
+                     labels = c('South Central Valley','Bay Area')) +
+  labs(title = 'Cases', y = NULL, x = NULL, color = NULL) +
+  theme_bw() +
+  theme(legend.position = 'top',
+        strip.background = element_rect(fill = 'white', color = 'white'),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) 
+
+# deaths
+one_week_deaths_metrics_df_long <- one_week_deaths_metrics_df %>%
+  inner_join(county_fips, by = 'fipscounty') %>%
+  pivot_longer(-c(fipscounty, model, countyname, ifbaycounty), 
+               names_to = 'metrics', values_to = 'values')
+one_week_deaths_metrics_df_long$metrics <- factor(
+  one_week_deaths_metrics_df_long$metrics, labels = metric_names)
+one_week_deaths_metrics_df_long$metrics <- factor(
+  one_week_deaths_metrics_df_long$metrics, levels = new_metric_names)
+
+one_week_deaths_metric_plot <- ggplot(one_week_deaths_metrics_df_long, 
+                                     aes(model, values, color = ifbaycounty)) +
+  geom_boxplot() +
+  facet_wrap(.~metrics, nrow = 1, scales = 'free_y') +
+  scale_color_viridis(discrete = TRUE, 
+                     labels = c('South Central Valley','Bay Area')) +
+  labs(title = 'Deaths', y = NULL, x = NULL, color = NULL) +
+  theme_bw() +
+  theme(legend.position = 'top',
+        strip.background = element_rect(fill = 'white', color = 'white'),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) 
+
+
+one_week_metrics_plot <- ggarrange(one_week_cases_metric_plot,
+                                  one_week_deaths_metric_plot,
+                                  nrow = 2,
+                                  common.legend = TRUE)
+one_week_metrics_plot
+
+```
+
+
+Comparing between Bay Area and South Central Valley counties, our model makes smaller normalized error among Bay Area counties with smaller difference within the group in number of cases and larger within group difference in number of deaths compared to South Central Valley. For MAPE, Bay Area counties slightly have higher value but their within group differences on both number of cases and number of deaths are smaller than South Central Valley counties even though we have more counties in the Bay Area. 
+
+We mainly have outliers in normalized error and MAPE from Figure 6. In predicting the cumulative cases, Stanislaus county from South Central Valley and Napa county from Bay Area are the upper outliers from the their county group in normalized error metrics while Marin county (Bay Area) is the upper outlier in MAPE. For cumulative deaths, Madera county and Tulare county (South Central Valley) are upper and lower outliers in normalized error metrics. Bay Area does not have outliers in normalized metric. For MAPE, South Central Valley does not have outliers but Bay Area has Napa county as the upper outlier. Madera and Napa counties have very low population density compared to other counties in the same clusters and they are reported to have outbreaks in number of cases and hospitalizations which are traced back to the transmission either at work settings (among farmers and business in and out of counties) or family gatherings, especially in low income and Latinx community.
+
+To compare the ARIMA-MA CLEP model's performance on this one-week period with that on a longer period, from September 02, 2020 to November 17, 2020, we need to compare Figure 6 with Figure 5. For cases predictions, to predict on a longer period generally yielded better performance for the ARIMA model. Not only that coverage is higher, but MAPE, normalized error, rawMAE and sqrtMAE are all lower, for both the bay area counties and south central valley counties, when predicting on the longer period in Figure 5. However, for the deaths predictions, this is not necessarily the case. For deaths predictions, predicting on a longer period only gave a higher coverage, but actually also yielded higher MAPE, Normalized error, rawMAE and sqrtMAE than what we have when predicting on the one-week period in Figure 6, for both the Bay Area counties and South Central Valley counties. 
+
+## Fitted Parameters Variance
+ARIMA-MA CLEP predictions are based on ARIMA and Moving Average models' predictions. We used the same tuned parameter $c$ and $\mu$ when making predictions over the most recent one week.
+
+ARIMA model is in the form `ARIMA(p, d, q)` where `p` is the order (number of time lags) of the autoregressive model, `d` is the degree of differencing, and `q` is the order of the moving-average model. Corresponding to `p` and `q`, we would have p `ar` parameters for autoregressive models and q `ma` parameters for moving-average model. For each county, on different dates, the model might have different values for `p`, `d` and `q` and corresponding different parameter values. Merced, Marin and Tulare counties generally have a more complicated model (4 to 5 parameters) compared to other counties. The number of parameters in the model for a county tends to not change over the day, but the values of each parameter vary day by day. However, overall, the variation is not significant.
+
+With Moving Average model, we use the 7 days of historical rate of change. Between counties, the rate of change ranges between 0% to 1.9%. Marin county has 0% rate of change in number of cases continuously over several days and counties with high rate of change are Santa Clara, Napa and Stainislaus. we have the rates of change vary within in less than 0.1% for each county over different days. The range of rate of change in number deaths is smaller, between 0% to 0.8% with the variation rate bewteen days less than 0.1%. Napa and San Mateo counties have the lowest rate of changes while Madera and Sonoma counties have the highest values.
+
+## Model Feature Importance 
+Since ARIMA and MA model only uses historical cumulative counts in cases and deaths, the most important features are cumulative cases (in predicting cases) and cumulative deaths (in predicting deaths).
+
+## Model Stability In The Future
+
+The question of assessing the model's stability can be addressed in many ways, we propose to look at the CLEP component and ask the question of how dependent are our predictions on accurate reporting of the deaths over the last week.  
+The motivation for this question is by the assumption that the reported number of deaths, may not be completely accurate due to human errors in the reporting process for example.  
+We look at deaths predictions and sample the noise from a Poisson distribution ($\lambda=3$). We add/subtract the noise with equal probability.
+
+To gain a basic understanding, we will add noise to our labels we use to perform CLEP and check visually what our predictions look like.
+
+
+```{r, fig.cap="Comparing our method's prediction using true labels and noisy labels for the CLEP operation"}
+fipscounty <- 6001
+k.val <- 7
+mu <- 0.5
+c <- 1
+cases <- FALSE
+stability.clep.fname <- here('other/clep_stability.csv')
+stability.clep.noise.fname <- here('other/clep_stability_noise.csv')
+if (!file.exists(stability.clep.fname)){
+  clep <- getClepDataCountyUs(fipscounty, cases, k.val, mu, c, noise=FALSE)
+  write_csv(clep, stability.clep.fname)
+}
+
+if (!file.exists(stability.clep.noise.fname)){
+  clep.noise <- getClepDataCountyUs(fipscounty, cases, k.val, mu, c, noise=TRUE)
+  write_csv(clep.noise, stability.clep.noise.fname)
+}
+
+clep <-read_csv(stability.clep.fname) 
+clep.noise <- read_csv(stability.clep.noise.fname) 
+ggplot() +
+    geom_line(data=clep,
+              aes(as.Date(date), clep, color = 'CLEP'), alpha=0.7) + 
+        geom_line(data=clep.noise, aes(x=date, y=clep,color = 'CLEP with noise'), alpha=0.7) +
+    ylab("Deaths") + xlab("") + theme_minimal() + labs(color='') 
+
+
+```
+
+We can see that since both models make very similar predictions the CLEP operation is not sensitive to noise.  
+
+Another aspect of stability we look at is the variability of the counties between rural and urban areas. We use our model on both Bay Area (urban) and South Central Valley (rural) counties. Even though the model's performance is not the same on both groups of counties, but their individual performance is acceptable. Therefore, we believe that our model would work on different set of data coming from different demographic areas. In addition, our model is trained on different period of the pandemic (the beginning, before and after big holidays). Since our model is time series based, the model cannot pick up sudden change in cumulative cases and cumulative deaths caused by external factors. However, given enough time observed, the model will start picking up those new changes in trends or seasonality (yearly data for holiday trend) and will perform better. 
+
+# Predictions on December 10 to December 16, 2020
+To produce the prediction, we use 80% confidence interval from `auto.arima` for ARIMA predictions and 80th quantile for MA model to produce the lower and upper predictions. To ensemble the predictions from ARIMA and MA models, we use the latest weight for each county from the training result. We save the prediction in `other/7-day-ahead.csv`.
+
+# Discussion
+1. Discuss your predictions of cases vs. the predictions of deaths. Was predicting one more challenging than the other? do you trust your methods and predictions? Why and why not?  
+
+We feel that our model is a fairly good predictor for both cases and deaths, with the main strength of this predictor is the fact that it is trained every day which is how a model with so few parameters can show great flexibility in picking up changing trends. 
+The deaths prediction presented us with numerical challenges in the cases where no new deaths were reported for a few days. We feel that as long as the dynamic of the pandemic does not change dramatically, by introduction of vaccine or unprecedented lockdown our model should make accurate predictions. Otherwise we are looking at making predictions on out of distribution data, a setting under which the model's behavior can be unexpected.
+
+2. Do you think your methods will work for other times during the pandemic? In the past? What about the future? Explain?   
+
+Our model is best suited for the pandemic and was trained and evaluated on pandemic-time data.  As long as there's no drastic change in the dynamics of the pandemic our model should utilize the daily re-trains to produce fairly accurate predictions. Once, for example, people would start getting vaccines we suspect that our model may have a harder time to pick up the new trend.
+
+3. Discuss your initial collaboration plan. Did you end up following that plan or did things change as the project progressed? What worked and what did not? What parts of this collaboration did you find most challenging? Is there anything you would have done differently?
+
+We have our `final_plan.xlsx` in $\backslash$other  folder which includes the details of our execution plan. We had a general outline of what tasks needed to be done, but did not assign members to specific tasks at the beginning. We went through the list of tasks needed to be done in each meeting, brainstormed sub-tasks and divided the work. Since we had a list of specific tasks to do, it was easy for us to assign the work and keep track of the workflow. During the project, we did not meet the deadlines on some tasks and had to postpone those tasks and sometimes we switched task assignments between members for the time constraints and difficulty of the tasks. The most challenging part of this project was implementing methods from the paper and evaluate the results. If we get to start the project again, we would spend more time discussing the format and structures of functions we implemented in this project, so it would be smoother when we combine everyone's work.
+
+# Bonus section
+I initially called 1 (800) 782-4264 (option 6) and was told to call (909) 387 4859 since the phone number was for Covid-19 community services information. I tried to call (909) 387 4859, but no one answered. Then, I called (909) 387-9146, obtained from http://www.sbcounty.gov/main/Pages/departments.aspx, and the representative transferred me to Covid-19 hotline but no one picked up so I left the message. The link http://www.sbcity.org/about/covid19/default.asp listed (909) 387-3977 as San Bernardino County COVID-19 Public Information Line but no one picked up the phone. On the website https://sbcovid19.com/, which cannot be accessed sometimes, (909) 387-3911 is listed as contact. From this phone number, I was able to reach someone who had some information related to the data reporting. 
+
+1. Where does the data come from? There is a team called Surveillance Team and they are responsible for collecting the data and managing data upload to sbcovid19.com. The team the person I talked to is only responsible to help give the information related Covid-19 to those who don't have access to the internet. 
+
+2. How do you determine whether or not to attribute a death to COVID-19? The death is attributed to COVID-19 is based on the death certificate signed by doctors.
+
+3. How do you decide what day to report the death? They report data everyday and it will be updated to sbcovid19.com website to the public.
+
+4. Can you share the data with me? The access to the data source is under control of a higher level team. She only has access to information posted on sbcovid19.com under a tab called Dashboard. The website actually has a lot of detailed data related to Covid-19 information in San Bernardino county. In case sbcovid19.com cannot be accessed, this link might take you to data link. (https://sbcph.maps.arcgis.com/apps/opsdashboard/index.html#/44bb35c804c44c8281da6d82ee602dff)
+
+
+
+
